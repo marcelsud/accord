@@ -40,7 +40,7 @@ because aggregate state and event sequence numbers start fresh in memory.
 ## Follow the domain
 
 1. A command decides an `Opened` or `Deposited` event and commits it through the
-   Accord host.
+   Accord runtime.
 2. `bank.flush()` delivers events to the ledger projection and notification
    policy.
 3. The projection calls `LedgerStore.record`. Stable event IDs allow the store to
@@ -102,7 +102,7 @@ upserts the same event IDs. A failed statement rolls back the entire batch.
 | [`adapters/notifications-effect.ts`](adapters/notifications-effect.ts) | Effect notification adapter                                  |
 | [`adapters/dummy-notifications.ts`](adapters/dummy-notifications.ts)   | Dummy notification system                                    |
 | [`adapters/sqlite.ts`](adapters/sqlite.ts)                             | SQLite ledger implementation                                 |
-| [`run.ts`](run.ts)                                                     | Binds the adapters, hosts the model, and runs the example    |
+| [`run.ts`](run.ts)                                                     | Binds the adapters, wires the model, and runs the example    |
 
 ## Verify failure and replay behavior
 

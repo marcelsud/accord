@@ -60,7 +60,7 @@ export interface MemoryStore {
   readonly listeners: Map<string, Set<() => void>>;
   readonly versions: Map<string, number>;
 }
-/** In-process storage. Reuse this object between hosts to retain in-process history. */
+/** In-process storage. Reuse this object between runtimes to retain in-process history. */
 export function memory(): MemoryStore {
   return { kind: 'memory', rows: new Map(), views: new Map(), cursors: new Map(), watermarks: new Map(), streams: new Map(), runs: new Map(), locks: new Map(), listeners: new Map(), versions: new Map() };
 }
@@ -119,7 +119,7 @@ export interface StreamClient<S> {
   list(key: string, options?: { after?: number }): Promise<Result<readonly { id: string; event: S; seq: number }[], Unexpected>>;
   watch(key: string, options?: { signal?: AbortSignal }): AsyncGenerator<Result<Snapshot<readonly { id: string; event: S; seq: number }[]>, Unexpected>, void, unknown>;
 }
-export type Host<M extends AnyModel> = {
+export type Runtime<M extends AnyModel> = {
   readonly [K in keyof M['aggregates']]: AggregateClient<M['aggregates'][K]>;
 } & {
   readonly [K in keyof M['views']]: ViewClient<ViewState<M['views'][K]>>;
@@ -128,9 +128,9 @@ export type Host<M extends AnyModel> = {
   readonly streams: { readonly [K in keyof M['streams']]: StreamClient<Infer<M['streams'][K]['event']>> };
   readonly flush: () => Promise<Result<void, Tagged>>;
 };
-export type HostOptions<M extends AnyModel> = { readonly storage?: MemoryStore } &
+export type RuntimeOptions<M extends AnyModel> = { readonly storage?: MemoryStore } &
   (keyof ModelServices<M> extends never ? { readonly services?: ModelServices<M> } : { readonly services: ModelServices<M> });
-export function host<M extends AnyModel>(definition: M, ...options: keyof ModelServices<M> extends never ? [options?: HostOptions<M>] : [options: HostOptions<M>]): Host<M> {
+export function wire<M extends AnyModel>(definition: M, ...options: keyof ModelServices<M> extends never ? [options?: RuntimeOptions<M>] : [options: RuntimeOptions<M>]): Runtime<M> {
   const store = options[0]?.storage ?? memory();
   const services = (options[0]?.services ?? {}) as Record<string, unknown>;
   const prefix = JSON.stringify([definition.name]);
@@ -385,20 +385,20 @@ export function host<M extends AnyModel>(definition: M, ...options: keyof ModelS
       },
     });
   }
-  return output as Host<M>;
+  return output as Runtime<M>;
 }
 export interface StoryContext<M extends AnyModel> {
-  readonly bank: Host<M>;
+  readonly bank: Runtime<M>;
   readonly equal: (actual: unknown, expected: unknown) => void;
   readonly given: <A extends M['aggregates'][keyof M['aggregates']]>(aggregate: A, id: string, events: readonly SourceEvent<A>[]) => Promise<Result<void, Unexpected>>;
 }
 export async function story<M extends AnyModel, R, E extends Tagged>(
   definition: M, body: (context: StoryContext<M>) => Promise<Result<R, E>> | Result<R, E>,
-  ...options: keyof ModelServices<M> extends never ? [options?: HostOptions<M>] : [options: HostOptions<M>]
+  ...options: keyof ModelServices<M> extends never ? [options?: RuntimeOptions<M>] : [options: RuntimeOptions<M>]
 ): Promise<Result<R, E | Unexpected>> {
   try {
     const storage = options[0]?.storage ?? memory();
-    const bank = host(definition, { ...options[0], storage } as HostOptions<M>);
+    const bank = wire(definition, { ...options[0], storage } as RuntimeOptions<M>);
     return await body({
       bank,
       equal(actual, expected) { if (!isDeepStrictEqual(actual, expected)) throw new Error('Story assertion failed'); },

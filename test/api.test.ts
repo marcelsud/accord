@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { api, client, fail, host, ok, rejection, serve } from '../src/index.js';
+import { api, client, fail, wire, ok, rejection, serve } from '../src/index.js';
 import { Account, Bank, Summary } from './fixtures.js';
 import { failure, success } from './helpers.js';
 
@@ -10,7 +10,7 @@ const Public = api('Public', { model: Bank, commands: [Account.commands.open, Ac
   return ok({ actor: 'alice' });
 });
 function setup() {
-  const bank = host(Bank);
+  const bank = wire(Bank);
   const fetch = serve(Public, { runtime: bank });
   const localFetch: typeof globalThis.fetch = async (input, options) => fetch(new Request(input, options));
   const remote = client<typeof Public>('https://accord.test/api', { fetch: localFetch, headers: { authorization: 'Bearer test' } });
@@ -70,7 +70,7 @@ test('client transport failures and invalid responses become Unexpected errors',
 
 test('API authorization defects hide server causes and retain a client Error object', async () => {
   const Defective = api('Defective', { model: Bank, commands: [Account.commands.open], views: [] }, () => { throw new Error('secret: credential'); });
-  const fetch = serve(Defective, { runtime: host(Bank) });
+  const fetch = serve(Defective, { runtime: wire(Bank) });
   const response = await fetch(new Request('https://accord.test/api', { method: 'POST', body: JSON.stringify({ kind: 'command', operation: 'account.open', target: 'a', input: {} }) }));
   const text = await response.text();
   assert.ok(!text.includes('credential'));

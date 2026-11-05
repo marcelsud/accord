@@ -3,7 +3,7 @@ import {
   command,
   event,
   fail,
-  host,
+  wire,
   integer,
   match,
   model,
@@ -76,7 +76,7 @@ export const Bank = model("Bank", {
   views: { summary: Summary },
 });
 
-const bank = host(Bank);
+const bank = wire(Bank);
 const [, openError] = await bank.account.open("a-1", {});
 if (openError !== null) throw openError;
 const [receipt, error] = await bank.account.deposit(

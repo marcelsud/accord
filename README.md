@@ -81,7 +81,7 @@ those events. Keep decisions and reducers deterministic; external actions belong
 in policies or workflows. The reply is supplied by the command body and checked
 against its schema; Accord does not compute it from the resulting state.
 
-The host validates the input, decision, reply, and resulting state before
+The runtime validates the input, decision, reply, and resulting state before
 committing. Commands for one instance run in order. Commands for different
 instances can run independently. A successful commit stores events, state, and
 the command receipt together in memory.
@@ -170,12 +170,12 @@ const DepositRules = service("DepositRules", { maximum: integer });
 
 Add `uses: { rules: DepositRules }` to an operation's contract. Its native body
 receives the typed dependency as `ctx.rules`. Supply the implementation through
-`host(Model, { services: { rules: { maximum: 1_000 } } })`.
+`wire(Model, { services: { rules: { maximum: 1_000 } } })`.
 
 Service names identify dependencies and must be unique. Each alias must refer
 to the same dependency throughout a model. Context metadata names such as
 `actor`, `signal`, and `commandId` are reserved. Commands receive trusted metadata
-from the host; HTTP callers cannot provide an actor or dependency bindings.
+from the runtime; HTTP callers cannot provide an actor or dependency bindings.
 
 ## Add optional Effect integration
 
@@ -216,7 +216,7 @@ an interrupted command does not commit.
 
 `effectify(Dependency)` returns a stable Effect service key.
 `effectify(Command)` lifts a standalone command into a lazy Effect-returning
-function. This evaluates a **decision**, not a hosted aggregate commit:
+function. This evaluates a **decision** without committing aggregate changes:
 
 ```ts
 const program = Effect.gen(function* () {
@@ -233,7 +233,7 @@ await Effect.runPromise(
 ```
 
 Dependency keys preserve their native service shape, including tuple-returning
-functions. The tuple host executes Effect-backed bodies in their own Effect
+functions. The runtime executes Effect-backed bodies in their own Effect
 execution with declared services and an abort signal. Ambient FiberRefs and
 tracing context are not automatically bridged from an outer Effect execution.
 
@@ -247,14 +247,23 @@ tracing context are not automatically bridged from an outer Effect execution.
 | `projection(name, contract, body)` | `(batch, ctx) => Result`; replayable, idempotent writes |
 | `external(name, contract, body)` | `(input, ctx) => Result`; `.implement(services)` binds an adapter |
 | `workflow(name, contract, body)` | `(input, run) => Result`; checkpointed steps and compensation in memory |
-| `stream(name, contract)` | Declares a keyed event stream; append, list, and watch through the host |
+| `stream(name, contract)` | Declares a keyed event stream; append, list, and watch through the runtime |
 | `api(name, contract, authorize?)` | `(request, ctx) => Result<{ actor? }, Rejection>`; selects exposed commands and views |
 | `story(model, body, options?)` | Test with `bank`, `given`, and `equal`; returns a tuple |
 
 A model registers aggregates and optional views, policies, projections,
-workflows, and streams. `host(model, { storage: memory(), services })` creates
-clients. `bank.flush()` catches consumers up and returns the first delivery
-failure. Failed deliveries retain their checkpoint and retry on the next flush.
+workflows, and streams. Make it executable with `wire`:
+
+```ts
+import { wire } from "@marcelsud/accord";
+
+const bank = wire(Bank);
+```
+
+Pass `{ storage: memory(), services }` as the second argument to share storage
+or supply declared dependencies. `bank.flush()` catches consumers up and returns
+the first delivery failure. Failed deliveries retain their checkpoint and retry
+on the next flush.
 No background scheduler or automatic backoff is provided.
 
 Views and projections rebuild from history. Policies skip history, including

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Cause, Effect, Exit } from 'effect';
 import { effectify } from '../src/effect.js';
-import { aggregate, command, external, host, integer, match, model, ok, policy, service, string } from '../src/index.js';
+import { aggregate, command, external, wire, integer, match, model, ok, policy, service, string } from '../src/index.js';
 import { Account, Balance, Cents, Deposited, NotOpen, Opened, State, open } from './fixtures.js';
 import { failure, success } from './helpers.js';
 
@@ -29,7 +29,7 @@ test('effectify creates stable function-style service keys without .service', ()
 });
 
 test('Effect.gen command bodies use declared services and still return native tuples', async () => {
-  const bank = host(model('EffectBank', { aggregates: { account: LimitedAccount } }), { services: { rules: { maximum: 100 } } });
+  const bank = wire(model('EffectBank', { aggregates: { account: LimitedAccount } }), { services: { rules: { maximum: 100 } } });
   success(await bank.account.open('a', {}));
   assert.equal(success(await bank.account.deposit('a', { amount: 50 })).reply.balance, 50);
   assert.equal(failure(await bank.account.deposit('a', { amount: 101 }))._tag, 'NotOpen');
@@ -86,7 +86,7 @@ test('Effect interruption cancels execution, runs finalizers, and leaves state u
     )),
   );
   const SlowAccount = aggregate('SlowAccount', { state: State, initial: () => ({ open: false, balance: 0 }), commands: { open: slow } }, state => ({ ...state, open: true }));
-  const bank = host(model('SlowBank', { aggregates: { account: SlowAccount } }));
+  const bank = wire(model('SlowBank', { aggregates: { account: SlowAccount } }));
   const controller = new AbortController();
   const pending = bank.account.open('a', {}, { signal: controller.signal });
   await ready;
@@ -115,7 +115,7 @@ test('Effect-backed policies receive uses as their environment', async () => {
       return undefined;
     })),
   );
-  const bank = host(model('PolicyBank', { aggregates: { account: Account }, policies: [reaction] }), { services: { rules: { maximum: 50 } } });
+  const bank = wire(model('PolicyBank', { aggregates: { account: Account }, policies: [reaction] }), { services: { rules: { maximum: 50 } } });
   success(await bank.account.open('a', {}));
   success(await bank.account.deposit('a', { amount: 100 }));
   success(await bank.flush());

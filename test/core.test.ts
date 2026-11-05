@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  aggregate, command, event, external, fail, host, integer, literal, match, memory, model, nullable, number,
+  aggregate, command, event, external, fail, wire, integer, literal, match, memory, model, nullable, number,
   object, ok, optional, parse, policy, projection, rejection, service, stream, string, trycatch, unexpected,
   union, view, type Result, type Tagged,
 } from '../src/index.js';
@@ -64,8 +64,8 @@ test('direct commands validate input, events, replies, and declared rejections',
   assert.equal(failure(await wrongReply({ open: false, balance: 0 }, {}))._tag, 'Unexpected');
 });
 
-test('host serializes commands, deduplicates identities, and checks optimistic versions', async () => {
-  const bank = host(Bank);
+test('wire serializes commands, deduplicates identities, and checks optimistic versions', async () => {
+  const bank = wire(Bank);
   success(await bank.account.open('a', {}));
   const first = success(await bank.account.deposit('a', { amount: 10 }, { commandId: 'same' }));
   assert.deepEqual(success(await bank.account.deposit('a', { amount: 10 }, { commandId: 'same' })), first);
@@ -84,7 +84,7 @@ test('failed reducers cannot partially commit and handler mutations do not escap
     return fail(NotOpen());
   });
   const broken = aggregate('Broken', { state: State, initial: () => ({ open: false, balance: 0 }), commands: { open, mutate } }, () => { throw new Error('reduce'); });
-  const bank = host(model('BrokenModel', { aggregates: { account: broken } }));
+  const bank = wire(model('BrokenModel', { aggregates: { account: broken } }));
   assert.equal(failure(await bank.account.open('a', {}))._tag, 'Unexpected');
   assert.equal(failure(await bank.account.mutate('a', {}))._tag, 'NotOpen');
   assert.deepEqual(success(await bank.account.get('a')), { open: false, balance: 0 });
@@ -92,7 +92,7 @@ test('failed reducers cannot partially commit and handler mutations do not escap
 });
 
 test('views catch up at receipts and returned snapshots cannot mutate stored state', async () => {
-  const bank = host(Bank);
+  const bank = wire(Bank);
   success(await bank.account.open('a', {}));
   const receipt = success(await bank.account.deposit('a', { amount: 50 }));
   assert.equal(success(await bank.summary.get('a')), null);
@@ -107,28 +107,28 @@ test('views catch up at receipts and returned snapshots cannot mutate stored sta
 
 test('view versions rebuild from full history and model names isolate storage', async () => {
   const storage = memory();
-  const bank = host(Bank, { storage });
+  const bank = wire(Bank, { storage });
   success(await bank.account.open('a', {}));
   success(await bank.account.deposit('a', { amount: 10 }));
   success(await bank.flush());
   const Changed = view('Summary', { from: Account, on: [Deposited], state: Balance, version: 2, initial: () => ({ balance: 0 }) }, (state, event) => ({ balance: state.balance + 2 * event.amount }));
-  const changed = host(model('Bank', { aggregates: { account: Account }, views: { summary: Changed } }), { storage });
+  const changed = wire(model('Bank', { aggregates: { account: Account }, views: { summary: Changed } }), { storage });
   success(await changed.flush());
   assert.deepEqual(success(await changed.summary.get('a')), { balance: 20 });
-  const other = host(model('OtherBank', { aggregates: { account: Account } }), { storage });
+  const other = wire(model('OtherBank', { aggregates: { account: Account } }), { storage });
   assert.deepEqual(success(await other.account.get('a')), { open: false, balance: 0 });
 });
 
 test('policies start with new events and failed deliveries remain pending', async () => {
   const storage = memory();
-  const first = host(Bank, { storage });
+  const first = wire(Bank, { storage });
   success(await first.account.open('a', {}));
   success(await first.account.deposit('a', { amount: 10 }));
   let attempts = 0;
   const Notify = service('Notify', { send: { parse: value => value as (id: string) => Promise<Result<void, ReturnType<typeof NotOpen>>> } });
   const reaction = policy('NotifyDeposit', { from: Account, on: [Deposited], uses: { notify: Notify } }, async ({ id }, { notify }) => notify.send(id));
   const delivered: string[] = [];
-  const bank = host(model('Bank', { aggregates: { account: Account }, policies: [reaction] }), {
+  const bank = wire(model('Bank', { aggregates: { account: Account }, policies: [reaction] }), {
     storage, services: { notify: { async send(id: string) { attempts++; if (attempts === 1) return fail(NotOpen()); delivered.push(id); return ok(undefined); } } },
   });
   success(await bank.flush());
@@ -145,7 +145,7 @@ test('policies start with new events and failed deliveries remain pending', asyn
 
 test('projections replay history, batch inputs, and preserve stable event identities', async () => {
   const storage = memory();
-  const bank = host(Bank, { storage });
+  const bank = wire(Bank, { storage });
   success(await bank.account.open('a', {}));
   for (let i = 0; i < 5; i++) success(await bank.account.deposit('a', { amount: 1 }));
   const rows = new Map<string, number>();
@@ -155,7 +155,7 @@ test('projections replay history, batch inputs, and preserve stable event identi
     for (const envelope of batch) rows.set(envelope.id, envelope.event.amount);
     return ok(undefined);
   });
-  const projecting = host(model('Bank', { aggregates: { account: Account }, projections: [ledger] }), { storage });
+  const projecting = wire(model('Bank', { aggregates: { account: Account }, projections: [ledger] }), { storage });
   success(await projecting.flush());
   success(await projecting.flush());
   assert.deepEqual(sizes, [2, 2, 1]);
@@ -165,7 +165,7 @@ test('projections replay history, batch inputs, and preserve stable event identi
 test('views support multiple routing keys and downstream folds', async () => {
   const Routed = view('Routed', { from: Account, on: [Deposited], state: Balance, initial: () => ({ balance: 0 }), keyOf: () => ['all', 'copy'] }, (state, event) => ({ balance: state.balance + event.amount }));
   const Downstream = view('Downstream', { from: Routed, on: [Deposited], state: Balance, initial: () => ({ balance: 0 }) }, (state, event) => ({ balance: state.balance + event.amount }));
-  const bank = host(model('RoutedBank', { aggregates: { account: Account }, views: { routed: Routed, downstream: Downstream } }));
+  const bank = wire(model('RoutedBank', { aggregates: { account: Account }, views: { routed: Routed, downstream: Downstream } }));
   success(await bank.account.open('a', {}));
   success(await bank.account.deposit('a', { amount: 7 }));
   success(await bank.flush());
@@ -175,7 +175,7 @@ test('views support multiple routing keys and downstream folds', async () => {
 
 test('native view watchers yield snapshots and detach on cancellation', async () => {
   const storage = memory();
-  const bank = host(Bank, { storage });
+  const bank = wire(Bank, { storage });
   const controller = new AbortController();
   const watcher = bank.summary.watch('a', { signal: controller.signal });
   const initial = await watcher.next();
@@ -209,7 +209,7 @@ test('external operations validate both sides and normalize vendor failures', as
 
 test('streams validate, deduplicate, and reject conflicting replay identities', async () => {
   const Activity = stream('Activity', { key: string, event: { text: string } });
-  const bank = host(model('Streams', { aggregates: { account: Account }, streams: { activity: Activity } }));
+  const bank = wire(model('Streams', { aggregates: { account: Account }, streams: { activity: Activity } }));
   assert.equal(success(await bank.streams.activity.append('a', { text: 'one' }, { id: 'same' })).cursor, 1);
   assert.equal(success(await bank.streams.activity.append('a', { text: 'one' }, { id: 'same' })).cursor, 1);
   assert.equal(failure(await bank.streams.activity.append('a', { text: 'two' }, { id: 'same' }))._tag, 'CommandConflict');
@@ -218,13 +218,13 @@ test('streams validate, deduplicate, and reject conflicting replay identities', 
 
 test('new and rebuilt views never trigger historical policy actions', async () => {
   const storage = memory();
-  const original = host(Bank, { storage });
+  const original = wire(Bank, { storage });
   success(await original.account.open('a', {}));
   success(await original.account.deposit('a', { amount: 10 }));
   let actions = 0;
   const Seen = view('Seen', { from: Account, on: [Deposited], state: Balance, initial: () => ({ balance: 0 }) }, (state, event) => ({ balance: state.balance + event.amount }));
   const reaction = policy('OnSeen', { from: Seen, on: [Deposited] }, () => { actions++; return ok(undefined); });
-  const bank = host(model('Bank', { aggregates: { account: Account }, views: { seen: Seen }, policies: [reaction] }), { storage });
+  const bank = wire(model('Bank', { aggregates: { account: Account }, views: { seen: Seen }, policies: [reaction] }), { storage });
   success(await bank.flush());
   assert.equal(actions, 0);
   success(await bank.account.deposit('a', { amount: 1 }));
@@ -232,16 +232,16 @@ test('new and rebuilt views never trigger historical policy actions', async () =
   assert.equal(actions, 1);
   const Rebuilt = view('Seen', { from: Account, on: [Deposited], state: Balance, version: 2, initial: () => ({ balance: 0 }) }, (state, event) => ({ balance: state.balance + event.amount }));
   const updatedPolicy = policy('OnSeen', { from: Rebuilt, on: [Deposited] }, () => { actions++; return ok(undefined); });
-  const rebuilt = host(model('Bank', { aggregates: { account: Account }, views: { seen: Rebuilt }, policies: [updatedPolicy] }), { storage });
+  const rebuilt = wire(model('Bank', { aggregates: { account: Account }, views: { seen: Rebuilt }, policies: [updatedPolicy] }), { storage });
   success(await rebuilt.flush());
   assert.equal(actions, 1);
-  assert.throws(() => host(model('Bank', { aggregates: { account: Account }, views: { seen: Seen } }), { storage }));
+  assert.throws(() => wire(model('Bank', { aggregates: { account: Account }, views: { seen: Seen } }), { storage }));
 });
 
 test('receipt consistency works through chained views', async () => {
   const First = view('First', { from: Account, on: [Deposited], state: Balance, initial: () => ({ balance: 0 }) }, (state, event) => ({ balance: state.balance + event.amount }));
   const Second = view('Second', { from: First, on: [Deposited], state: Balance, initial: () => ({ balance: 0 }) }, (state, event) => ({ balance: state.balance + event.amount }));
-  const bank = host(model('Chained', { aggregates: { account: Account }, views: { second: Second, first: First } }));
+  const bank = wire(model('Chained', { aggregates: { account: Account }, views: { second: Second, first: First } }));
   success(await bank.account.open('a', {}));
   const receipt = success(await bank.account.deposit('a', { amount: 10 }));
   assert.deepEqual(success(await bank.second.get('a', { atLeast: receipt })), { balance: 10 });
@@ -254,7 +254,7 @@ test('native cancellation after a handler starts still prevents a commit', async
     return ok({ events: [Opened()] });
   });
   const Late = aggregate('Late', { state: State, initial: () => ({ open: false, balance: 0 }), commands: { open: late } }, state => ({ ...state, open: true }));
-  const bank = host(model('LateModel', { aggregates: { account: Late } }));
+  const bank = wire(model('LateModel', { aggregates: { account: Late } }));
   assert.equal(failure(await bank.account.open('a', {}, { signal: controller.signal }))._tag, 'Unexpected');
   assert.equal(success(await bank.account.get('a')).open, false);
 });
@@ -266,21 +266,21 @@ test('reserved API names and conflicting dependency identities fail during setup
   const Second = service('SameService', { value: integer });
   const one = policy('One', { from: Account, on: [Deposited], uses: { first: First } }, () => ok(undefined));
   const two = policy('Two', { from: Account, on: [Deposited], uses: { second: Second } }, () => ok(undefined));
-  assert.throws(() => host(model('Same', { aggregates: { account: Account }, policies: [one, two] }), { services: { first: { value: 1 }, second: { value: 2 } } }));
+  assert.throws(() => wire(model('Same', { aggregates: { account: Account }, policies: [one, two] }), { services: { first: { value: 1 }, second: { value: 2 } } }));
 });
 
 test('command identities distinguish structured-cloneable custom schema values', async () => {
   const DateSchema = { parse(value: unknown) { if (!(value instanceof Date)) throw new TypeError('Expected Date'); return value; } };
   const dated = command({ state: State, input: { at: DateSchema }, events: [Opened] }, () => ok({ events: [Opened()] }));
   const Dated = aggregate('Dated', { state: State, initial: () => ({ open: false, balance: 0 }), commands: { open: dated } }, state => ({ ...state, open: true }));
-  const bank = host(model('DatedModel', { aggregates: { account: Dated } }));
+  const bank = wire(model('DatedModel', { aggregates: { account: Dated } }));
   success(await bank.account.open('a', { at: new Date(0) }, { commandId: 'same' }));
   assert.equal(failure(await bank.account.open('a', { at: new Date(1) }, { commandId: 'same' }))._tag, 'CommandConflict');
 });
 
 test('consistent view reads succeed even when an unrelated policy is pending', async () => {
   const reaction = policy('AlwaysFails', { from: Account, on: [Deposited] }, () => fail(NotOpen()));
-  const bank = host(model('ReadDespitePolicy', { aggregates: { account: Account }, views: Bank.views, policies: [reaction] }));
+  const bank = wire(model('ReadDespitePolicy', { aggregates: { account: Account }, views: Bank.views, policies: [reaction] }));
   success(await bank.account.open('a', {}));
   const receipt = success(await bank.account.deposit('a', { amount: 10 }));
   assert.deepEqual(success(await bank.summary.get('a', { atLeast: receipt })), { balance: 10 });

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { fail, host, integer, memory, model, ok, rejection, string, workflow } from '../src/index.js';
+import { fail, wire, integer, memory, model, ok, rejection, string, workflow } from '../src/index.js';
 import { Account, NotOpen } from './fixtures.js';
 import { failure, success } from './helpers.js';
 
@@ -21,14 +21,14 @@ test('workflow steps checkpoint results, deduplicate runs, and pass stable opera
   });
   const storage = memory();
   const definition = model('Jobs', { aggregates: { account: Account }, workflows: { job: Job } });
-  const bank = host(definition, { storage });
+  const bank = wire(definition, { storage });
   const results = await Promise.all([bank.workflows.job({ id: 'one', amount: 5 }), bank.workflows.job({ id: 'one', amount: 5 })]);
   assert.deepEqual(success(results[0]!), { value: 10 });
   assert.deepEqual(success(results[1]!), { value: 10 });
   assert.equal(executions, 1);
   assert.equal(ids.length, 1);
   assert.equal(failure(await bank.workflows.job({ id: 'one', amount: 6 }))._tag, 'CommandConflict');
-  const restarted = host(definition, { storage });
+  const restarted = wire(definition, { storage });
   assert.deepEqual(success(await restarted.workflows.job({ id: 'one', amount: 5 })), { value: 10 });
   assert.equal(executions, 1);
 });
@@ -46,7 +46,7 @@ test('workflow failures compensate successful steps in reverse order', async () 
     if (secondError !== null) return fail(secondError);
     return fail(Failed());
   });
-  const bank = host(model('Compensation', { aggregates: { account: Account }, workflows: { job: Job } }));
+  const bank = wire(model('Compensation', { aggregates: { account: Account }, workflows: { job: Job } }));
   assert.equal(failure(await bank.workflows.job({ id: 'one' }))._tag, 'Failed');
   assert.deepEqual(trace, ['first', 'second', 'undo:2', 'undo:1']);
   assert.equal(failure(await bank.workflows.job({ id: 'one' }))._tag, 'Failed');
@@ -63,7 +63,7 @@ test('failed compensations stay pending and retry without rerunning successful s
     if (error !== null) return fail(error);
     return fail(Failed());
   });
-  const bank = host(model('RetryCompensation', { aggregates: { account: Account }, workflows: { job: Job } }));
+  const bank = wire(model('RetryCompensation', { aggregates: { account: Account }, workflows: { job: Job } }));
   assert.equal(failure(await bank.workflows.job({ id: 'one' }))._tag, 'Unexpected');
   assert.equal(failure(await bank.workflows.job({ id: 'one' }))._tag, 'Failed');
   assert.equal(steps, 1);
@@ -81,7 +81,7 @@ test('workflow signals can arrive before wait and timers use named checkpoints',
     if (timerError !== null) return fail(timerError);
     return ok({ approved });
   });
-  const bank = host(model('Waiting', { aggregates: { account: Account }, workflows: { job: Job } }));
+  const bank = wire(model('Waiting', { aggregates: { account: Account }, workflows: { job: Job } }));
   const pending = bank.workflows.job({ id: 'one' });
   await started;
   success(await bank.workflows.job.signal('one', 'approval', 'yes'));
@@ -100,7 +100,7 @@ test('interrupted workflows resume from successful steps', async () => {
     if (error !== null) return fail(error);
     return ok({ value });
   });
-  const bank = host(model('Resuming', { aggregates: { account: Account }, workflows: { job: Job } }));
+  const bank = wire(model('Resuming', { aggregates: { account: Account }, workflows: { job: Job } }));
   const controller = new AbortController();
   const interrupted = bank.workflows.job({ id: 'one' }, { signal: controller.signal });
   await started;
@@ -114,7 +114,7 @@ test('interrupted workflows resume from successful steps', async () => {
 test('cached workflow defects retain their Unexpected tag and original cause', async () => {
   const cause = Symbol('original');
   const Job = workflow('Defect', { input: { id: string }, reply: {}, key: input => input.id }, () => { throw cause; });
-  const bank = host(model('DefectiveJob', { aggregates: { account: Account }, workflows: { job: Job } }));
+  const bank = wire(model('DefectiveJob', { aggregates: { account: Account }, workflows: { job: Job } }));
   for (let attempt = 0; attempt < 2; attempt++) {
     const error = failure(await bank.workflows.job({ id: 'one' }));
     assert.equal(error._tag, 'Unexpected');

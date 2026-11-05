@@ -1,6 +1,6 @@
 import { fail, ok, unexpected, type Result, type Tagged, type Unexpected } from './result.js';
 import { bindBody, tuple, checkError, checkUses, validateUses, type AnyCommand, type AnyTaggedFactory, type AnyRejection, type Values, type AnyView, type Body, type ContextOf, type Uses } from './definitions.js';
-import { type AnyModel, type Host } from './runtime.js';
+import { type AnyModel, type Runtime } from './runtime.js';
 
 export interface ApiRequest {
   readonly kind: 'command' | 'view'; readonly operation: string; readonly target: string;
@@ -45,11 +45,11 @@ export type ApiClient<A extends AnyApi> = {
     [C in keyof A['model']['aggregates'][K]['commands'] as A['model']['aggregates'][K]['commands'][C] extends A['commands'][number] ? C : never]: unknown
   } extends never ? never : K]: {
     [C in keyof A['model']['aggregates'][K]['commands'] as A['model']['aggregates'][K]['commands'][C] extends A['commands'][number] ? C : never]:
-      WithErrors<Host<A['model']>[K & keyof Host<A['model']>][C & keyof Host<A['model']>[K & keyof Host<A['model']>]], A extends Api<any, any, any, any, any, infer E> ? E | NotFound | Unauthorized : never>;
+      WithErrors<Runtime<A['model']>[K & keyof Runtime<A['model']>][C & keyof Runtime<A['model']>[K & keyof Runtime<A['model']>]], A extends Api<any, any, any, any, any, infer E> ? E | NotFound | Unauthorized : never>;
   }
 } & {
   [K in keyof A['model']['views'] as A['model']['views'][K] extends A['views'][number] ? K : never]: {
-    [R in 'get' | 'snapshot' | 'events']: WithErrors<Host<A['model']>[K & keyof Host<A['model']>][R & keyof Host<A['model']>[K & keyof Host<A['model']>]], A extends Api<any, any, any, any, any, infer E> ? E | NotFound | Unauthorized : never>;
+    [R in 'get' | 'snapshot' | 'events']: WithErrors<Runtime<A['model']>[K & keyof Runtime<A['model']>][R & keyof Runtime<A['model']>[K & keyof Runtime<A['model']>]], A extends Api<any, any, any, any, any, infer E> ? E | NotFound | Unauthorized : never>;
   }
 };
 function json(value: unknown, status = 200): Response {
@@ -57,7 +57,7 @@ function json(value: unknown, status = 200): Response {
   const body = JSON.stringify(value, (_key, value) => value instanceof Error ? { _tag: (value as Unexpected)._tag ?? 'Unexpected', message: value.message } : value);
   return new Response(body, { status, headers: { 'content-type': 'application/json' } });
 }
-export function serve<A extends AnyApi>(definition: A, options: { readonly runtime: Host<A['model']> } &
+export function serve<A extends AnyApi>(definition: A, options: { readonly runtime: Runtime<A['model']> } &
   (keyof A['uses'] extends never ? { readonly services?: ContextOf<A['uses']> } : { readonly services: ContextOf<A['uses']> }),
 ): (request: Request) => Promise<Response> {
   return async request => {

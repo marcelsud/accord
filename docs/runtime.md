@@ -24,7 +24,7 @@ Projection handlers should use stable event IDs in destination upserts. A new
 projection version replays all source history; migrate or clear the destination
 if an upsert cannot replace its old rows.
 
-Consumers run only when `host.flush()` is called, including the flush performed
+Consumers run only when `bank.flush()` is called, including the flush performed
 by an `atLeast` read. A failed consumer stops that flush; calling it again retries
 the unacknowledged delivery. A command receipt reports the aggregate commit,
 not successful completion of every consumer. Avoid awaiting `flush()` from a
@@ -63,9 +63,10 @@ The body receives `run.services` and:
 
 - `run.step(name, task, { compensate? })`: saves successful results and reuses
   them on another invocation. The task receives a stable `commandId` and
-  `idempotencyKey`. Forward them to hosted commands and external adapters.
+  `idempotencyKey`. Forward them to commands executed through the runtime and
+  external adapters.
 - `run.wait(name, schema)`: waits for a named, validated signal. Send it through
-  `host.workflows.alias.signal(runKey, name, value)`.
+  `bank.workflows.alias.signal(runKey, name, value)`.
 - `run.sleep(name, milliseconds)`: records an in-memory deadline and waits for it.
 
 Use distinct names for steps, waits, and timers within one run. Put external I/O
@@ -88,7 +89,7 @@ const job = workflow(
 ```
 
 Checkpoints, signals, compensation status, and deadlines live in the shared
-`memory()` object. Reusing it across hosts preserves them within the same
+`memory()` object. Reusing it across runtimes preserves them within the same
 process. There is no disk-backed or distributed workflow engine in v0.1.
 
 ## HTTP APIs
@@ -117,7 +118,7 @@ const PublicBank = api(
   },
 );
 
-const fetchHandler = serve(PublicBank, { runtime: host(Bank) });
+const fetchHandler = serve(PublicBank, { runtime: wire(Bank) });
 const remote = client<typeof PublicBank>("https://your-server/api", {
   headers: { authorization: "Bearer example" },
 });
@@ -135,7 +136,7 @@ mount it in your HTTP server. Requests use POST and a JSON body containing
 A custom fetch implementation makes transport tests possible without a server.
 
 The v0.1 HTTP transport supports commands and view `get`, `snapshot`, and
-`events`. Live subscriptions, workflows, and explicit streams are native-host
+`events`. Live subscriptions, workflows, and explicit streams are native runtime
 APIs, not HTTP endpoints. There is no WebSocket, SSE, OpenAPI, or MCP transport.
 Server-side `Unexpected` causes and stacks are omitted from HTTP responses;
 the client recreates an `Error` with the sanitized response as its cause.
@@ -147,7 +148,7 @@ rejects every unlisted command.
 
 ## Stories
 
-`story(model, async test => { ... }, hostOptions?)` supplies `test.bank`,
+`story(model, async test => { ... }, options?)` supplies `test.bank`,
 `test.given`, and `test.equal`. It converts thrown assertions to `Unexpected`.
 `test.given(aggregate, id, events)` validates and folds history into a fresh
 instance and returns a tuple. Seeded events rebuild projections and views but
@@ -181,6 +182,6 @@ strings, numbers, booleans, arrays, and records in the bundled examples.
 
 Effect support targets v4.1.2 or newer in the v4 line. Its optional adapter lifts
 dependencies, standalone commands, and Effect-returning handlers. It does
-not convert an arbitrary native callback or hosted client automatically. Native
+not convert an arbitrary native callback or runtime client automatically. Native
 dependency shapes remain native, so tuple-returning service calls still need a
 bridge when used inside a generator.

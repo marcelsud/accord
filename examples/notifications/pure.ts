@@ -2,7 +2,7 @@ import {
   aggregate,
   command,
   fail,
-  host,
+  wire,
   match,
   memory,
   model,
@@ -78,6 +78,6 @@ export function createBank(
   notifications: NotificationPort,
   storage = memory(),
 ) {
-  const bank = host(Bank, { storage, services: { ledger, notifications } });
+  const bank = wire(Bank, { storage, services: { ledger, notifications } });
   return { bank, projection: LedgerProjection };
 }

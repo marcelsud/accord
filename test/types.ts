@@ -1,7 +1,7 @@
 import { Effect } from 'effect';
 import { effectify } from '../src/effect.js';
 import {
-  command, event, external, fail, host, integer, match, model, ok, rejection, service, string,
+  command, event, external, fail, wire, integer, match, model, ok, rejection, service, string,
   type Infer, type Requirement, type Result,
 } from '../src/index.js';
 import { Account, AlreadyOpen, Balance, Bank, Cents, Deposited, InsufficientFunds, NotOpen, State, deposit } from './fixtures.js';
@@ -71,8 +71,8 @@ command(
   },
 );
 async function clientInference() {
-  const bank = host(Bank);
-  // @ts-expect-error Command inputs are inferred through model and host.
+  const bank = wire(Bank);
+  // @ts-expect-error Command inputs are inferred through model and wire.
   await bank.account.deposit('a', { amount: '100' });
   // @ts-expect-error Unknown commands are rejected.
   bank.account.missing;
@@ -117,11 +117,11 @@ Limited({ open: true, balance: 0 }, { amount: 10 });
 Limited({ open: true, balance: 0 }, { amount: 10 }, { rules: { maximum: 100 } });
 const LimitedAccount = { ...Account, commands: { deposit: Limited } };
 const LimitedBank = model('LimitedBank', { aggregates: { account: LimitedAccount } });
-// @ts-expect-error Hosting requires all declared dependencies.
-host(LimitedBank);
-host(LimitedBank, { services: { rules: { maximum: 100 } } });
-// @ts-expect-error Hosting validates dependency implementation types.
-host(LimitedBank, { services: { rules: { maximum: 'wrong' } } });
+// @ts-expect-error Wiring requires all declared dependencies.
+wire(LimitedBank);
+wire(LimitedBank, { services: { rules: { maximum: 100 } } });
+// @ts-expect-error Wiring validates dependency implementation types.
+wire(LimitedBank, { services: { rules: { maximum: 'wrong' } } });
 
 const Notify = external('Notify', { input: { text: string }, reply: { id: string } }, input => ok({ id: input.text }));
 const notify = Notify.implement({});
