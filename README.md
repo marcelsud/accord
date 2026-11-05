@@ -2,9 +2,10 @@
 
 **Composable domain modeling**, simplifying DDD for the rest of us.
 
-`@marcelsud/accord` describes decisions with lambda bodies, records events, and
-builds views and reactions from them. Business failures are plain tagged values.
-Operations return `[value, null]` or `[null, error]`. Effect is optional.
+`@marcelsud/accord` keeps domain modeling simple. Define business rules, record
+what happened, and describe what should happen next through a small, explicit
+API. Business failures are plain tagged values. Operations return
+`[value, null]` or `[null, error]`. Effect is optional.
 
 This first version includes an **in-process runtime**. It is suitable for tests,
 prototypes, and exploring the API. Storage, delivery checkpoints, and workflow
@@ -33,7 +34,7 @@ To consume a local build, run `npm pack` and install the generated
 `@marcelsud/accord`; install `effect@^4.1.2` only when importing
 `@marcelsud/accord/effect`.
 
-## Write decisions as lambdas
+## Define business rules
 
 The following excerpt uses the schemas and constructors defined in
 [the bank example](examples/bank.ts):
@@ -61,7 +62,7 @@ const deposit = command(
 ```
 
 A standalone command declares its `state` schema so TypeScript can infer the
-lambda's state before it is registered with an aggregate. The body is `decide`:
+handler's state before it is registered with an aggregate. The body is `decide`:
 it describes events and a reply. The aggregate's reducer is `evolve`: it applies
 those events. Keep decisions and reducers deterministic; external actions belong
 in policies or workflows. The reply is supplied by the command body and checked
@@ -163,7 +164,7 @@ to the same dependency throughout a model. Context metadata names such as
 `actor`, `signal`, and `commandId` are reserved. Commands receive trusted metadata
 from the host; HTTP callers cannot provide an actor or dependency bindings.
 
-## Add Effect to a lambda body
+## Add optional Effect integration
 
 Install Effect separately. The core entry point never imports it.
 
@@ -225,7 +226,7 @@ tracing context are not automatically bridged from an outer Effect execution.
 
 ## Build the rest of the model
 
-| Primitive | Lambda and behavior |
+| Primitive | Handler and behavior |
 | --- | --- |
 | `aggregate(name, contract, evolve)` | `(state, event) => state`; infers events from commands |
 | `view(name, contract, evolve)` | `(state, event, envelope) => state`; replays history, supports routing and versions |

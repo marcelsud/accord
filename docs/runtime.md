@@ -180,7 +180,7 @@ round-trip through JSON. Instance IDs and schema-backed domain values are
 strings, numbers, booleans, arrays, and records in the bundled examples.
 
 Effect support targets v4.1.2 or newer in the v4 line. Its optional adapter lifts
-dependencies, standalone commands, and Effect-returning handler lambdas. It does
+dependencies, standalone commands, and Effect-returning handlers. It does
 not convert an arbitrary native callback or hosted client automatically. Native
 dependency shapes remain native, so tuple-returning service calls still need a
 bridge when used inside a generator.
