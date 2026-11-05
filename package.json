@@ -1,0 +1,52 @@
+{
+  "name": "@marcelsud/accord",
+  "version": "0.1.0",
+  "description": "Composable domain modeling. Simplifying DDD for the rest of us.",
+  "type": "module",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=24"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/marcelsud/accord.git"
+  },
+  "files": [
+    "dist",
+    "docs",
+    "examples",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./effect": {
+      "types": "./dist/effect.d.ts",
+      "import": "./dist/effect.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "tsc -p tsconfig.test.json && node --test --test-isolation=none .test-build/test/*.test.js",
+    "check": "npm run typecheck && npm test && npm run build",
+    "example": "node .test-build/examples/bank.js",
+    "prepack": "npm run build"
+  },
+  "peerDependencies": {
+    "effect": "^4.1.2"
+  },
+  "peerDependenciesMeta": {
+    "effect": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "effect": "4.1.2",
+    "typescript": "^7.0.2"
+  },
+  "sideEffects": false
+}
