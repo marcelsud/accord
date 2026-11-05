@@ -18,18 +18,18 @@ import {
   Notifications,
   Opened,
   State,
-  depositContract,
+  Deposit,
   ledgerRows,
-  openContract,
+  Open,
   type LedgerPort,
   type NotificationPort,
 } from "./domain.js";
 
-const open = command(openContract, (state) => {
+const open = command(Open, (state) => {
   if (state.open) return fail(AlreadyOpen());
   return ok({ events: [Opened()] });
 });
-const deposit = command(depositContract, (state, { amount }) => {
+const deposit = command(Deposit, (state, { amount }) => {
   if (!state.open) return fail(NotOpen());
   const balance = state.balance + amount;
   return ok({ events: [Deposited({ amount, balance })], reply: { balance } });

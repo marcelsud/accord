@@ -5,7 +5,7 @@ import {
   Acknowledgement,
   NotificationConflict,
   NotificationsUnavailable,
-  notificationContract,
+  SendNotification,
   type NotificationPort,
 } from "../domain.js";
 
@@ -13,7 +13,7 @@ import {
 export function createNotifications(url: string): NotificationPort {
   const Send = external(
     "Bank/SendNotification",
-    notificationContract,
+    SendNotification,
     effectify((input) =>
       Effect.gen(function* () {
         const response = yield* Effect.tryPromise({
