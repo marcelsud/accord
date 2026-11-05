@@ -1,7 +1,7 @@
 # Runtime and transport reference
 
 All examples are excerpts. The bank definitions come from
-[`examples/bank.ts`](../examples/bank.ts). Public exports are available from
+[`examples/bank/pure.ts`](../examples/bank/pure.ts). Public exports are available from
 `@marcelsud/accord`; only the adapter imports `@marcelsud/accord/effect`.
 
 ## Views, projections, and policies

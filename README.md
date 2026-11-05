@@ -22,23 +22,23 @@ cd accord
 npm install
 npm run check
 npm run example
-node .test-build/examples/effect.js
+npm run example:effect
 ```
 
 The bank example prints `{ balance: 100 }`. The Effect example also runs that
-bank example, then prints `100`. [The complete bank](examples/bank.ts) and
-[Effect example](examples/effect.ts) are compiled with the tests.
+bank example, then prints `100`. [The complete bank](examples/bank/pure.ts) and
+[Effect example](examples/bank/with-effect.ts) are compiled with the tests.
 
-For a complete integration example, run both versions with SQLite and a local
-HTTP endpoint after `npm run check`:
+For a complete integration example, run both versions with a SQLite ledger and
+an external notification system after `npm run check`:
 
 ```sh
 npm run example:sqlite
 npm run example:sqlite:effect
 ```
 
-They project account events into SQLite and POST notifications to a real
-loopback HTTP server. [The walkthrough](examples/sqlite-http/README.md) explains
+They project account events into SQLite and send notifications through an
+external-system contract. [The walkthrough](examples/notifications/README.md) explains
 replay, idempotency keys, and failed-request retries. SQLite stores the derived
 ledger; aggregate state and delivery checkpoints remain in memory.
 
@@ -50,7 +50,7 @@ To consume a local build, run `npm pack` and install the generated
 ## Define business rules
 
 The following excerpt uses the schemas and constructors defined in
-[the bank example](examples/bank.ts):
+[the bank example](examples/bank/pure.ts):
 
 ```ts
 import { command, fail, ok } from "@marcelsud/accord";
@@ -278,6 +278,7 @@ external adapters, HTTP authorization, testing, and the limits of this release.
 ## Develop
 
 ```sh
+npm run format:examples  # Format all examples with Prettier
 npm run typecheck  # Positive assertions and @ts-expect-error inference tests
 npm test           # Build, compile tests, and run Node's built-in test runner
 npm run build      # ESM and declaration files in dist/
