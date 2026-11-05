@@ -5,7 +5,7 @@ import {
   object, ok, optional, parse, policy, projection, rejection, service, stream, string, trycatch, unexpected,
   union, view, type Result, type Tagged,
 } from '../src/index.js';
-import { Account, Balance, Bank, Cents, Deposited, InsufficientFunds, NotOpen, Opened, State, Withdrawn, deposit, open } from './fixtures.js';
+import { Account, AlreadyOpen, Balance, Bank, Cents, Deposited, InsufficientFunds, NotOpen, Opened, State, Withdrawn, deposit, open } from './fixtures.js';
 
 import { success, failure } from './helpers.js';
 
@@ -76,6 +76,61 @@ test('wire serializes commands, deduplicates identities, and checks optimistic v
   assert.deepEqual(success(await bank.account.get('a')), { open: true, balance: 40 });
   assert.equal(success(await bank.account.events('a')).length, 32);
   assert.equal(success(await bank.account.events('a', { after: 30 })).length, 2);
+});
+
+test('aggregate contract commands share validation and state isolation in direct and runtime execution', async () => {
+  const AccountContract = {
+    state: State,
+    commands: {
+      open: { input: {}, events: [Opened], rejects: [AlreadyOpen] },
+      deposit: { input: { amount: Cents }, events: [Deposited], rejects: [NotOpen], reply: Balance },
+    },
+  };
+  const open = command(AccountContract, 'open', state => {
+    if (state.open) return fail(AlreadyOpen());
+    return ok({ events: [Opened()] });
+  });
+  const deposit = command(AccountContract, 'deposit', (state, input) => {
+    const balance = state.balance + input.amount;
+    state.balance = 999;
+    if (!state.open) return fail(NotOpen());
+    return ok({ events: [Deposited(input)], reply: { balance } });
+  });
+  const snapshot = { open: true, balance: 10 };
+  assert.deepEqual(success(await deposit(snapshot, { amount: 5 })).reply, { balance: 15 });
+  assert.deepEqual(snapshot, { open: true, balance: 10 });
+  assert.equal(failure(await deposit(snapshot, { amount: 0 }))._tag, 'InvalidInput');
+  assert.equal(failure(await deposit({ open: false, balance: 0 }, { amount: 5 }))._tag, 'NotOpen');
+  assert.equal(failure(await deposit({ open: 'wrong', balance: 0 } as never, { amount: 5 }))._tag, 'Unexpected');
+  const account = aggregate('NamedAccount', {
+    state: AccountContract.state, initial: () => ({ open: false, balance: 0 }), commands: { open, deposit },
+  }, Account.evolve);
+  const bank = wire(model('NamedBank', { aggregates: { account } }));
+  failure(await bank.account.deposit('a', { amount: 5 }));
+  assert.deepEqual(success(await bank.account.get('a')), { open: false, balance: 0 });
+  success(await bank.account.open('a', {}));
+  assert.deepEqual(success(await bank.account.deposit('a', { amount: 5 })).reply, { balance: 5 });
+  assert.deepEqual(success(await bank.account.get('a')), { open: true, balance: 5 });
+});
+
+test('aggregate contract commands reject unknown names, state overrides, and mismatched registrations', () => {
+  const Contract = { state: State, commands: {
+    open: { input: {}, events: [Opened] },
+    deposit: { input: { amount: Cents }, events: [Deposited] },
+  } };
+  const body = () => ok({ events: [] });
+  for (const name of ['missing', 'toString', '__proto__']) {
+    assert.throws(() => (command as Function)(Contract, name, body), /Unknown command/);
+  }
+  assert.throws(() => (command as Function)({ state: State, commands: {
+    open: { ...Contract.commands.open, state: State },
+  } }, 'open', body), /state is inherited/);
+  const open = command(Contract, 'open', body);
+  const deposit = command({ ...Contract }, 'deposit', body);
+  const initial = () => ({ open: false, balance: 0 });
+  assert.throws(() => aggregate('WrongName', { state: State, initial, commands: { renamed: open } }, state => state), /does not belong/);
+  assert.throws(() => aggregate('WrongState', { state: { open: integer }, initial: () => ({ open: 0 }), commands: { open } } as never, state => state), /does not belong/);
+  assert.doesNotThrow(() => aggregate('SharedState', { state: State, initial, commands: { open, deposit } }, state => state));
 });
 
 test('failed reducers cannot partially commit and handler mutations do not escape', async () => {

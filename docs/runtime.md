@@ -4,6 +4,26 @@ All examples are excerpts. The bank definitions come from
 [`examples/bank/pure.ts`](../examples/bank/pure.ts). Public exports are available from
 `@marcelsud/accord`; only the adapter imports `@marcelsud/accord/effect`.
 
+## Commands and state
+
+Declare an aggregate contract as `{ state, commands }`. Each command entry
+declares `input`, `events`, and optional `rejects`, `reply`, and `uses`.
+`command(AccountContract, "deposit", body)` inherits the aggregate state schema
+and infers the handler from the selected command. Child entries cannot override
+state. Unknown or inherited command names are rejected at runtime.
+
+Calling `deposit(state, input)` directly validates and returns a decision; it
+does not save state or apply events. Calling
+`bank.account.deposit(id, input)` through `wire(Bank)` loads the current state,
+executes the command, applies events, and commits. Both paths isolate the
+handler's state with `structuredClone`.
+
+Register implementations with `aggregate(name, { state: AccountContract.state,
+initial, commands: { open, deposit } }, evolve)`. Commands created from aggregate
+contracts must retain their declared names and state schema when registered.
+The two-argument `command({ state, input, events, ... }, body)` form is also
+supported for independently declared commands.
+
 ## Views, projections, and policies
 
 `view(name, { from, on, state, initial, version?, keyOf? }, evolve)` folds selected

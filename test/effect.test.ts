@@ -8,8 +8,14 @@ import { failure, success } from './helpers.js';
 
 const Rules = service('DepositRules', { maximum: integer });
 const RulesKey = effectify(Rules);
+const LimitedAccountContract = {
+  state: State,
+  commands: {
+    deposit: { input: { amount: Cents }, events: [Deposited], rejects: [NotOpen], reply: Balance, uses: { rules: Rules } },
+  },
+};
 const limited = command(
-  { state: State, input: { amount: Cents }, events: [Deposited], rejects: [NotOpen], reply: Balance, uses: { rules: Rules } },
+  LimitedAccountContract, 'deposit',
   effectify((state, input) => Effect.gen(function* () {
     const rules = yield* effectify(Rules);
     if (!state.open || input.amount > rules.maximum) return yield* Effect.fail(NotOpen());

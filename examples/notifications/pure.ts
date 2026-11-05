@@ -17,19 +17,17 @@ import {
   NotOpen,
   Notifications,
   Opened,
-  State,
-  DepositContract,
+  AccountContract,
   ledgerRows,
-  OpenContract,
   type LedgerPort,
   type NotificationPort,
 } from "./domain.js";
 
-const open = command(OpenContract, (state) => {
+const open = command(AccountContract, "open", (state) => {
   if (state.open) return fail(AlreadyOpen());
   return ok({ events: [Opened()] });
 });
-const deposit = command(DepositContract, (state, { amount }) => {
+const deposit = command(AccountContract, "deposit", (state, { amount }) => {
   if (!state.open) return fail(NotOpen());
   const balance = state.balance + amount;
   return ok({ events: [Deposited({ amount, balance })], reply: { balance } });
@@ -37,7 +35,7 @@ const deposit = command(DepositContract, (state, { amount }) => {
 const Account = aggregate(
   "Account",
   {
-    state: State,
+    state: AccountContract.state,
     initial: () => ({ open: false, balance: 0 }),
     commands: { open, deposit },
   },

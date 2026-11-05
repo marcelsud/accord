@@ -29,19 +29,22 @@ export const NotificationConflict = rejection("NotificationConflict", {
   eventId: string,
 });
 
-export const OpenContract = {
+export const AccountContract = {
   state: State,
-  input: {},
-  events: [Opened],
-  rejects: [AlreadyOpen],
-} as const;
-export const DepositContract = {
-  state: State,
-  input: { amount: Cents },
-  events: [Deposited],
-  rejects: [NotOpen],
-  reply: Balance,
-} as const;
+  commands: {
+    open: {
+      input: {},
+      events: [Opened],
+      rejects: [AlreadyOpen],
+    },
+    deposit: {
+      input: { amount: Cents },
+      events: [Deposited],
+      rejects: [NotOpen],
+      reply: Balance,
+    },
+  },
+};
 export const Notification = {
   eventId: string,
   accountId: string,
@@ -53,7 +56,7 @@ export const SendNotificationContract = {
   input: Notification,
   reply: Acknowledgement,
   rejects: [NotificationsUnavailable, NotificationConflict],
-} as const;
+};
 export interface NotificationPort {
   send(
     input: Infer<typeof Notification>,

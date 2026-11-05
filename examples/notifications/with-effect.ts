@@ -17,16 +17,15 @@ import {
   NotOpen,
   Notifications,
   Opened,
-  State,
-  DepositContract,
+  AccountContract,
   ledgerRows,
-  OpenContract,
   type LedgerPort,
   type NotificationPort,
 } from "./domain.js";
 
 const open = command(
-  OpenContract,
+  AccountContract,
+  "open",
   effectify((state) =>
     Effect.gen(function* () {
       if (state.open) return yield* Effect.fail(AlreadyOpen());
@@ -35,7 +34,8 @@ const open = command(
   ),
 );
 const deposit = command(
-  DepositContract,
+  AccountContract,
+  "deposit",
   effectify((state, { amount }) =>
     Effect.gen(function* () {
       if (!state.open) return yield* Effect.fail(NotOpen());
@@ -47,7 +47,7 @@ const deposit = command(
 const Account = aggregate(
   "Account",
   {
-    state: State,
+    state: AccountContract.state,
     initial: () => ({ open: false, balance: 0 }),
     commands: { open, deposit },
   },

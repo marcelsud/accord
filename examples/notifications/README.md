@@ -39,6 +39,11 @@ because aggregate state and event sequence numbers start fresh in memory.
 
 ## Follow the domain
 
+`domain.ts` declares `AccountContract` with one state schema and named command
+contracts. Both implementations use `command(AccountContract, "deposit", body)`
+and create the runtime with `wire(Bank, { storage, services })`. The native body
+returns tuples; the Effect body uses `effectify` and `Effect.gen`.
+
 1. A command decides an `Opened` or `Deposited` event and commits it through the
    Accord runtime.
 2. `bank.flush()` delivers events to the ledger projection and notification

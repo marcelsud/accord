@@ -55,31 +55,36 @@ The following excerpt uses the schemas and constructors defined in
 ```ts
 import { command, fail, ok } from "@marcelsud/accord";
 
-const deposit = command(
-  {
-    state: State,
-    input: { amount: Cents },
-    events: [Deposited],
-    rejects: [NotOpen],
-    reply: Balance,
+const AccountContract = {
+  state: State,
+  commands: {
+    deposit: {
+      input: { amount: Cents },
+      events: [Deposited],
+      rejects: [NotOpen],
+      reply: Balance,
+    },
   },
-  (state, { amount }) => {
-    if (!state.open) return fail(NotOpen());
+};
 
-    return ok({
-      events: [Deposited({ amount })],
-      reply: { balance: state.balance + amount },
-    });
-  },
-);
+const deposit = command(AccountContract, "deposit", (state, { amount }) => {
+  if (!state.open) return fail(NotOpen());
+
+  return ok({
+    events: [Deposited({ amount })],
+    reply: { balance: state.balance + amount },
+  });
+});
 ```
 
-A standalone command declares its `state` schema so TypeScript can infer the
-handler's state before it is registered with an aggregate. The body is `decide`:
-it describes events and a reply. The aggregate's reducer is `evolve`: it applies
-those events. Keep decisions and reducers deterministic; external actions belong
-in policies or workflows. The reply is supplied by the command body and checked
-against its schema; Accord does not compute it from the resulting state.
+Declare state once on the aggregate contract. `command(AccountContract,
+"deposit", body)` infers state, input, events, rejections, reply, and dependencies
+from the named declaration. Plain objects work without `as const` or explicit
+generics. The body is `decide`: it describes events and a reply. The aggregate's
+reducer is `evolve`: it applies those events. Keep decisions and reducers
+deterministic; external actions belong in policies or workflows. The reply is
+supplied by the command body and checked against its schema; Accord does not
+compute it from the resulting state.
 
 The runtime validates the input, decision, reply, and resulting state before
 committing. Commands for one instance run in order. Commands for different
@@ -185,15 +190,19 @@ Install Effect separately. The core entry point never imports it.
 import { Effect } from "effect";
 import { effectify } from "@marcelsud/accord/effect";
 
-const limitedDeposit = command(
-  {
-    state: State,
-    input: { amount: Cents },
-    events: [Deposited],
-    rejects: [NotOpen],
-    reply: Balance,
-    uses: { rules: DepositRules },
+const LimitedAccountContract = {
+  state: AccountContract.state,
+  commands: {
+    deposit: {
+      ...AccountContract.commands.deposit,
+      uses: { rules: DepositRules },
+    },
   },
+};
+
+const limitedDeposit = command(
+  LimitedAccountContract,
+  "deposit",
   effectify((state, { amount }) => Effect.gen(function* () {
     const rules = yield* effectify(DepositRules);
     if (!state.open || amount > rules.maximum) {

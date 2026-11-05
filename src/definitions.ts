@@ -116,6 +116,21 @@ export interface CommandContract<St extends SchemaInput, In extends SchemaInput,
   readonly reply?: Rep;
   readonly uses?: U;
 }
+export interface AggregateCommandContract {
+  readonly input: SchemaInput;
+  readonly events: readonly AnyEvent[];
+  readonly rejects?: readonly AnyRejection[];
+  readonly reply?: SchemaInput;
+  readonly uses?: Uses;
+  readonly state?: never;
+}
+export interface AggregateContract {
+  readonly state: SchemaInput;
+  readonly commands: Readonly<Record<string, AggregateCommandContract>>;
+}
+type DeclaredUses<C> = C extends { readonly uses: infer U extends Uses } ? U : {};
+type DeclaredReply<C> = C extends { readonly reply: infer R extends SchemaInput } ? Infer<R> : undefined;
+type DeclaredRejections<C> = C extends { readonly rejects: infer R extends readonly AnyRejection[] } ? Values<R> : never;
 export interface Command<S, I, E extends Tagged, Re extends Tagged, R, U extends Uses> {
   (state: S, input: I, ...context: ContextArgs<U>): Promise<Result<CommandDecision<E, R>, Re | InvalidInput | Unexpected>>;
   readonly kind: 'command';
@@ -125,23 +140,46 @@ export interface Command<S, I, E extends Tagged, Re extends Tagged, R, U extends
   readonly rejects: readonly AnyTaggedFactory[];
 }
 export type AnyCommand = Command<any, any, any, any, any, any>;
+const commandOrigins = new WeakMap<AnyCommand, { state: SchemaInput; name: string }>();
 export type StateOf<C> = C extends Command<infer S, any, any, any, any, any> ? S : never;
 export type InputOf<C> = C extends Command<any, infer I, any, any, any, any> ? I : never;
 export type EventsOf<C> = C extends Command<any, any, infer E, any, any, any> ? E : never;
 export type RejectionsOf<C> = C extends Command<any, any, any, infer E, any, any> ? E : never;
 export type ReplyOf<C> = C extends Command<any, any, any, any, infer R, any> ? R : never;
+export function command<const A extends AggregateContract, const K extends keyof A['commands'] & string>(
+  aggregate: A, name: K, body: Body<
+    [state: Infer<A['state']>, input: Infer<A['commands'][NoInfer<K>]['input']>],
+    DeclaredUses<A['commands'][NoInfer<K>]>,
+    CommandDecision<Values<A['commands'][NoInfer<K>]['events']>, DeclaredReply<A['commands'][NoInfer<K>]>>,
+    DeclaredRejections<A['commands'][NoInfer<K>]>
+  >,
+): Command<Infer<A['state']>, Infer<A['commands'][K]['input']>, Values<A['commands'][K]['events']>,
+  DeclaredRejections<A['commands'][K]>, DeclaredReply<A['commands'][K]>, DeclaredUses<A['commands'][K]>>;
 export function command<
   const St extends SchemaInput, const In extends SchemaInput, const Ev extends readonly AnyEvent[],
   const Re extends readonly AnyRejection[] = readonly [], const Rep extends SchemaInput | undefined = undefined,
   const U extends Uses = {},
 >(contract: CommandContract<St, In, Ev, Re, Rep, U>, body: Body<
   [state: Infer<St>, input: Infer<In>], U, CommandDecision<Values<Ev>, Rep extends SchemaInput ? Infer<Rep> : undefined>, Values<Re>
->): Command<Infer<St>, Infer<In>, Values<Ev>, Values<Re>, Rep extends SchemaInput ? Infer<Rep> : undefined, U> {
-  const uses = (contract.uses ?? {}) as U;
+>): Command<Infer<St>, Infer<In>, Values<Ev>, Values<Re>, Rep extends SchemaInput ? Infer<Rep> : undefined, U>;
+export function command(contract: any, body: any, aggregateBody?: any): AnyCommand {
+  let origin: { state: SchemaInput; name: string } | undefined;
+  if (arguments.length === 3) {
+    const name = body;
+    if (typeof name !== 'string' || !contract?.commands || !Object.hasOwn(contract.commands, name)) {
+      throw new TypeError(`Unknown command: ${String(name)}`);
+    }
+    const declaration = contract.commands[name];
+    if (!declaration || Object.hasOwn(declaration, 'state')) throw new TypeError('Command state is inherited from its aggregate contract');
+    origin = { state: contract.state, name };
+    contract = { ...declaration, state: contract.state };
+    body = aggregateBody;
+  }
+  const uses = contract.uses ?? {};
   validateUses(uses);
   const rejects = contract.rejects ?? [];
   const execute = bindBody(body, uses);
-  const callable = async (state: unknown, input: unknown, context: ContextOf<U> = {} as ContextOf<U>) => {
+  const callable = async (state: unknown, input: unknown, context: ContextOf<any> = {}) => {
     let parsed: unknown;
     try { parsed = parse(contract.input, input); }
     catch (cause) { return fail({ _tag: 'InvalidInput' as const, message: cause instanceof Error ? cause.message : String(cause) }); }
@@ -153,7 +191,7 @@ export function command<
       if (error !== null) return fail(checkError(rejects, error));
       if (!value || typeof value !== 'object' || !('events' in value) || !Array.isArray(value.events)) throw new TypeError('A command must return a decision with events');
       const events = value.events.map((value: Tagged) => {
-        const factory = contract.events.find(factory => factory.name === value?._tag);
+        const factory = contract.events.find((factory: AnyEvent) => factory.name === value?._tag);
         if (!factory) throw new TypeError(`Undeclared event: ${value?._tag}`);
         return factory.parse(value);
       });
@@ -163,7 +201,9 @@ export function command<
       return ok({ events, reply });
     } catch (cause) { return fail(unexpected(cause)); }
   };
-  return Object.assign(callable, { kind: 'command' as const, contract, uses, events: contract.events, rejects }) as AnyCommand;
+  const result = Object.assign(callable, { kind: 'command' as const, contract, uses, events: contract.events, rejects }) as AnyCommand;
+  if (origin) commandOrigins.set(result, origin);
+  return result;
 }
 
 export interface ExternalContract<I extends SchemaInput, R extends SchemaInput | undefined, Re extends readonly AnyRejection[], U extends Uses> {
@@ -223,6 +263,13 @@ export function aggregate<const N extends string, const S extends SchemaInput, c
   evolve: (state: Infer<S>, event: EventsOf<C[keyof C]>) => Infer<S>,
 ): Aggregate<N, Infer<S>, C> {
   for (const key of Object.keys(contract.commands)) if (['get', 'events', 'constructor', '__proto__', 'prototype', 'then'].includes(key)) throw new TypeError(`Reserved command name: ${key}`);
+  for (const [name, command] of Object.entries(contract.commands)) {
+    const origin = commandOrigins.get(command);
+    if (!origin) continue;
+    if (origin.name !== name || origin.state !== contract.state) {
+      throw new TypeError(`Command does not belong to this aggregate contract: ${name}`);
+    }
+  }
   const byName = new Map<string, AnyTaggedFactory>();
   for (const command of Object.values(contract.commands)) for (const event of command.events) {
     const previous = byName.get(event.name);

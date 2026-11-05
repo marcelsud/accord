@@ -1,18 +1,21 @@
 import { Effect } from "effect";
 import { effectify } from "@marcelsud/accord/effect";
 import { command, integer, service } from "@marcelsud/accord";
-import { Balance, Cents, Deposited, NotOpen, State } from "./pure.js";
+import { AccountContract, Deposited, NotOpen } from "./pure.js";
 
 export const DepositRules = service("DepositRules", { maximum: integer });
-export const limitedDeposit = command(
-  {
-    state: State,
-    input: { amount: Cents },
-    events: [Deposited],
-    rejects: [NotOpen],
-    reply: Balance,
-    uses: { rules: DepositRules },
+export const LimitedAccountContract = {
+  state: AccountContract.state,
+  commands: {
+    deposit: {
+      ...AccountContract.commands.deposit,
+      uses: { rules: DepositRules },
+    },
   },
+};
+export const limitedDeposit = command(
+  LimitedAccountContract,
+  "deposit",
   effectify((state, { amount }) =>
     Effect.gen(function* () {
       const rules = yield* effectify(DepositRules);

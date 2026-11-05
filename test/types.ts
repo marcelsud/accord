@@ -2,9 +2,9 @@ import { Effect } from 'effect';
 import { effectify } from '../src/effect.js';
 import {
   command, event, external, fail, wire, integer, match, model, ok, rejection, service, string,
-  type Infer, type Requirement, type Result,
+  type Infer, type ReplyOf, type Requirement, type Result,
 } from '../src/index.js';
-import { Account, AlreadyOpen, Balance, Bank, Cents, Deposited, InsufficientFunds, NotOpen, State, deposit } from './fixtures.js';
+import { Account, AlreadyOpen, Balance, Bank, Cents, Deposited, InsufficientFunds, NotOpen, Opened, State, deposit } from './fixtures.js';
 
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
 type Expect<T extends true> = T;
@@ -86,6 +86,89 @@ async function clientInference() {
 
 const Rules = service('Rules', { maximum: integer });
 const Other = service('Other', { label: string });
+const Labelled = event('Labelled', { label: string });
+// Plain declarations preserve inference without `as const` or explicit generics.
+const AccountContract = {
+  state: State,
+  commands: {
+    open: { input: {}, events: [Opened], rejects: [AlreadyOpen] },
+    deposit: { input: { amount: Cents }, events: [Deposited], rejects: [NotOpen], reply: Balance },
+    label: { input: { label: string }, events: [Labelled], reply: { label: string } },
+    limited: { input: { amount: Cents }, events: [Deposited], rejects: [NotOpen], reply: Balance, uses: { rules: Rules } },
+  },
+};
+const namedDeposit = command(AccountContract, 'deposit', (state, input, ctx) => {
+  type StateInference = Expect<Equal<typeof state, Infer<typeof State>>>;
+  type InputInference = Expect<Equal<typeof input.amount, number>>;
+  type SignalInference = Expect<Equal<typeof ctx.signal, AbortSignal | undefined>>;
+  // @ts-expect-error Input comes from the selected command, not its siblings.
+  input.label;
+  // @ts-expect-error Undeclared services are unavailable.
+  ctx.rules;
+  if (!state.open) return fail(NotOpen());
+  return ok({ events: [Deposited(input)], reply: { balance: state.balance + input.amount } });
+});
+const namedOpen = command(AccountContract, 'open', () => ok({ events: [Opened()] }));
+type NoReply = Expect<Equal<ReplyOf<typeof namedOpen>, undefined>>;
+command(AccountContract, 'label', (_state, input) => ok({ events: [Labelled(input)], reply: input }));
+command(AccountContract, 'limited', (state, input, ctx) => {
+  type NativeService = Expect<Equal<typeof ctx.rules.maximum, number>>;
+  if (input.amount > ctx.rules.maximum) return fail(NotOpen());
+  return ok({ events: [Deposited(input)], reply: { balance: state.balance + input.amount } });
+});
+// @ts-expect-error The command name must belong to the aggregate contract.
+command(AccountContract, 'missing', () => ok({ events: [] }));
+command(AccountContract, 'deposit',
+  // @ts-expect-error Reply schemas are inherited from the selected command.
+  () => ok({ events: [], reply: { balance: 'wrong' } }),
+);
+command(AccountContract, 'deposit',
+  // @ts-expect-error Events from sibling commands are not allowed.
+  () => ok({ events: [Opened()], reply: { balance: 0 } }),
+);
+command(AccountContract, 'deposit',
+  // @ts-expect-error Rejections from sibling commands are not allowed.
+  () => fail(AlreadyOpen()),
+);
+command(AccountContract, 'open',
+  // @ts-expect-error A command without a reply schema cannot return a reply.
+  () => ok({ events: [], reply: { balance: 0 } }),
+);
+// @ts-expect-error Child declarations cannot override aggregate state.
+command({ state: State, commands: { open: { state: State, input: {}, events: [Opened] } } }, 'open', () => ok({ events: [] }));
+const namedLimited = command(AccountContract, 'limited', effectify((state, input) => Effect.gen(function* () {
+  type EffectState = Expect<Equal<typeof state.balance, number>>;
+  type EffectInput = Expect<Equal<typeof input.amount, number>>;
+  const rules = yield* effectify(Rules);
+  if (input.amount > rules.maximum) return yield* Effect.fail(NotOpen());
+  return { events: [Deposited(input)], reply: { balance: state.balance + input.amount } };
+})));
+command(AccountContract, 'limited',
+  // @ts-expect-error Effect requirements must be declared by the selected command.
+  effectify((state, input) => Effect.gen(function* () {
+    yield* effectify(Other);
+    return { events: [Deposited(input)], reply: { balance: state.balance + input.amount } };
+  })),
+);
+const namedProgram = effectify(namedLimited)({ open: true, balance: 0 }, { amount: 10 });
+type NamedRequirements = Expect<Equal<Effect.Services<typeof namedProgram>, Requirement<typeof Rules>>>;
+// @ts-expect-error Named commands require the context declared in uses.
+namedLimited({ open: true, balance: 0 }, { amount: 10 });
+namedLimited({ open: true, balance: 0 }, { amount: 10 }, { rules: { maximum: 100 } });
+// @ts-expect-error Native service implementations retain their schema.
+namedLimited({ open: true, balance: 0 }, { amount: 10 }, { rules: { maximum: 'wrong' } });
+async function namedCommandInference() {
+  // @ts-expect-error Named command inputs retain their schema.
+  namedDeposit({ open: true, balance: 0 }, { amount: 'wrong' });
+  const [decision, error] = await namedDeposit({ open: true, balance: 0 }, { amount: 10 });
+  // @ts-expect-error An unchecked decision is unknown.
+  decision.reply;
+  if (error !== null) {
+    type RejectionInference = Expect<Equal<typeof error._tag, 'NotOpen' | 'InvalidInput' | 'Unexpected'>>;
+    return;
+  }
+  type ReplyInference = Expect<Equal<typeof decision.reply.balance, number>>;
+}
 const Limited = command(
   { state: State, input: { amount: Cents }, events: [Deposited], rejects: [NotOpen], reply: Balance, uses: { rules: Rules } },
   effectify((state, input) => Effect.gen(function* () {

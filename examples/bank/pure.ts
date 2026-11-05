@@ -22,21 +22,29 @@ export const Deposited = event("Deposited", { amount: Cents });
 export const AlreadyOpen = rejection("AlreadyOpen");
 export const NotOpen = rejection("NotOpen");
 
-export const open = command(
-  { state: State, input: {}, events: [Opened], rejects: [AlreadyOpen] },
-  (state) => {
-    if (state.open) return fail(AlreadyOpen());
-    return ok({ events: [Opened()] });
+export const AccountContract = {
+  state: State,
+  commands: {
+    open: {
+      input: {},
+      events: [Opened],
+      rejects: [AlreadyOpen],
+    },
+    deposit: {
+      input: { amount: Cents },
+      events: [Deposited],
+      rejects: [NotOpen],
+      reply: Balance,
+    },
   },
-);
+};
+export const open = command(AccountContract, "open", (state) => {
+  if (state.open) return fail(AlreadyOpen());
+  return ok({ events: [Opened()] });
+});
 export const deposit = command(
-  {
-    state: State,
-    input: { amount: Cents },
-    events: [Deposited],
-    rejects: [NotOpen],
-    reply: Balance,
-  },
+  AccountContract,
+  "deposit",
   (state, { amount }) => {
     if (!state.open) return fail(NotOpen());
     return ok({
@@ -48,7 +56,7 @@ export const deposit = command(
 export const Account = aggregate(
   "Account",
   {
-    state: State,
+    state: AccountContract.state,
     initial: () => ({ open: false, balance: 0 }),
     commands: { open, deposit },
   },
