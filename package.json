@@ -30,10 +30,12 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
-    "test": "tsc -p tsconfig.test.json && node --test --test-isolation=none .test-build/test/*.test.js",
-    "check": "npm run typecheck && npm test && npm run build",
+    "test": "npm run build && tsc -p tsconfig.test.json && node --test --test-isolation=none .test-build/test/*.test.js",
+    "check": "npm run typecheck && npm test",
     "example": "node .test-build/examples/bank.js",
-    "prepack": "npm run build"
+    "prepack": "npm run build",
+    "example:sqlite": "node .test-build/examples/sqlite-http/run.js pure",
+    "example:sqlite:effect": "node .test-build/examples/sqlite-http/run.js effect"
   },
   "peerDependencies": {
     "effect": "^4.1.2"

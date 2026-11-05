@@ -29,6 +29,19 @@ The bank example prints `{ balance: 100 }`. The Effect example also runs that
 bank example, then prints `100`. [The complete bank](examples/bank.ts) and
 [Effect example](examples/effect.ts) are compiled with the tests.
 
+For a complete integration example, run both versions with SQLite and a local
+HTTP endpoint after `npm run check`:
+
+```sh
+npm run example:sqlite
+npm run example:sqlite:effect
+```
+
+They project account events into SQLite and POST notifications to a real
+loopback HTTP server. [The walkthrough](examples/sqlite-http/README.md) explains
+replay, idempotency keys, and failed-request retries. SQLite stores the derived
+ledger; aggregate state and delivery checkpoints remain in memory.
+
 To consume a local build, run `npm pack` and install the generated
 `marcelsud-accord-0.1.0.tgz` in another project. Import the core from
 `@marcelsud/accord`; install `effect@^4.1.2` only when importing
@@ -266,7 +279,7 @@ external adapters, HTTP authorization, testing, and the limits of this release.
 
 ```sh
 npm run typecheck  # Positive assertions and @ts-expect-error inference tests
-npm test           # Compile and run Node's built-in test runner
+npm test           # Build, compile tests, and run Node's built-in test runner
 npm run build      # ESM and declaration files in dist/
 npm run check      # All of the above
 ```
