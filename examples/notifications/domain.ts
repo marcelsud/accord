@@ -29,13 +29,13 @@ export const NotificationConflict = rejection("NotificationConflict", {
   eventId: string,
 });
 
-export const Open = {
+export const OpenContract = {
   state: State,
   input: {},
   events: [Opened],
   rejects: [AlreadyOpen],
 } as const;
-export const Deposit = {
+export const DepositContract = {
   state: State,
   input: { amount: Cents },
   events: [Deposited],
@@ -49,7 +49,7 @@ export const Notification = {
   balance: integer,
 };
 export const Acknowledgement = { id: string };
-export const SendNotification = {
+export const SendNotificationContract = {
   input: Notification,
   reply: Acknowledgement,
   rejects: [NotificationsUnavailable, NotificationConflict],
