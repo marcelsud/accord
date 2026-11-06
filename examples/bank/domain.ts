@@ -6,6 +6,7 @@ import {
   literal,
   model,
   ok,
+  on,
   parse,
   refine,
   rejection,
@@ -94,13 +95,8 @@ export const SavingsAccount = aggregate(
 
 const Summary = view(
   "Summary",
-  {
-    from: Account,
-    on: [Deposited],
-    state: { balance: integer },
-    initial: () => ({ balance: 0 }),
-  },
-  (_state, { balance }) => ({ balance }),
+  { from: Account, initial: { balance: 0 } },
+  on(Deposited, (_state, { balance }) => ({ balance })),
 );
 
 export const Bank = model("Bank", {

@@ -5,6 +5,7 @@ import { effectify } from '../src/effect.js';
 import { aggregate, command, external, fail, wire, integer, match, model, ok, policy, service, string, view } from '../src/index.js';
 import { Account, Balance, Cents, Deposited, NotOpen, Opened, State, open } from './fixtures.js';
 import { failure, success } from './helpers.js';
+import { Bank as BankModel, DepositRules } from '../examples/bank/domain.js';
 
 const Rules = service('DepositRules', { maximum: integer });
 const RulesKey = effectify(Rules);
@@ -175,4 +176,36 @@ test('effectified models resolve layers and run factory methods lazily through y
   );
   await Effect.runPromise(Effect.provide(program, dependencies));
   assert.deepEqual(audited, [100]);
+});
+
+test('named model layers share a wired bank within each provision', async () => {
+  const Bank = effectify(BankModel, 'Bank');
+  const BankLive = Bank.layer.pipe(Layer.provide(
+    Layer.succeed(effectify(DepositRules), { maximum: 100 }),
+  ));
+  const read = Effect.gen(function* () {
+    const bank = yield* Bank;
+    return yield* bank.account.get('a');
+  });
+  const deposit = Effect.gen(function* () {
+    const bank = yield* Bank;
+    yield* bank.account.open('a');
+    return yield* bank.account.deposit('a', 75);
+  });
+  const program = Effect.gen(function* () {
+    const receipt = yield* deposit;
+    const state = yield* read;
+    const bank = yield* Bank;
+    const summary = yield* bank.summary.get('a', { atLeast: receipt });
+    return { state, summary };
+  });
+
+  assert.deepEqual(await Effect.runPromise(Effect.provide(program, BankLive)), {
+    state: { status: 'OPEN', balance: 75 },
+    summary: { balance: 75 },
+  });
+  assert.deepEqual(await Effect.runPromise(Effect.provide(read, BankLive)), {
+    status: 'PENDING',
+    balance: 0,
+  });
 });

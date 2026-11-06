@@ -1,8 +1,8 @@
 import { Effect, Layer } from 'effect';
 import { effectify } from '../src/effect.js';
 import {
-  aggregate, command, event, external, fail, wire, integer, match, model, ok, rejection, service, string, vo,
-  type Infer, type ReplyOf, type Requirement, type Result,
+  aggregate, command, event, external, fail, wire, integer, match, model, ok, on, rejection, service, string, view, vo,
+  type Infer, type ReplyOf, type Requirement, type Result, type SourceEvent,
 } from '../src/index.js';
 import { Account, AlreadyOpen, Balance, Bank, Cents, Deposited, InsufficientFunds, NotOpen, Opened, State, deposit } from './fixtures.js';
 
@@ -82,6 +82,64 @@ async function clientInference() {
   const [summary, readError] = await bank.summary.get('a', { atLeast: receipt });
   if (readError !== null || summary === null) return;
   type ViewInference = Expect<Equal<typeof summary.balance, number>>;
+}
+
+async function viewHandlerInference() {
+  const Activity = view(
+    'Activity',
+    {
+      from: Account,
+      initial: { balance: 0, open: false },
+      keyOf: ({ event, source }) => {
+        type RoutedTags = Expect<Equal<typeof event._tag, 'Opened' | 'Deposited'>>;
+        return event._tag === 'Deposited' ? String(event.amount) : source.id;
+      },
+    },
+    on(Opened, (state, event) => {
+      type State = Expect<Equal<typeof state, { balance: number; open: boolean }>>;
+      type Event = Expect<Equal<typeof event, ReturnType<typeof Opened>>>;
+      return { ...state, open: true };
+    }),
+    on(Deposited, (state, event, envelope) => {
+      type Event = Expect<Equal<typeof event, ReturnType<typeof Deposited>>>;
+      type EnvelopeEvent = Expect<Equal<typeof envelope.event, typeof event>>;
+      return { ...state, balance: state.balance + event.amount };
+    }),
+  );
+  type Events = Expect<Equal<SourceEvent<typeof Activity>, ReturnType<typeof Opened> | ReturnType<typeof Deposited>>>;
+  const bank = wire(model('ActivityBank', { aggregates: { account: Account }, views: { activity: Activity } }));
+  const [state, error] = await bank.activity.get('a');
+  if (error === null && state !== null) {
+    type State = Expect<Equal<typeof state, { balance: number; open: boolean }>>;
+  }
+  const initial = { balance: 0 };
+  // @ts-expect-error A view must subscribe to at least one event.
+  view('Empty', { from: Account, initial });
+  // @ts-expect-error The event must belong to the source.
+  view('UnknownEvent', { from: Account, initial }, on(event('Unrelated'), state => state));
+  // @ts-expect-error Handlers must return the inferred state shape.
+  view('BadState', { from: Account, initial }, on(Deposited, () => ({ balance: 'wrong' })));
+  // @ts-expect-error A schema cannot produce a state incompatible with the initial value.
+  view('BadSchema', { from: Account, initial, schema: { balance: string } }, on(Deposited, state => state));
+
+  const FactoryAccount = aggregate('FactoryAccount', initial, ({ emit }) => ({
+    deposit(amount: number) {
+      emit(Deposited({ amount }));
+      return ok(undefined);
+    },
+  }));
+  const Single = view(
+    'Single',
+    { from: FactoryAccount, initial, keyOf: ({ event }) => String(event.amount) },
+    on(Deposited, (state, { amount }) => ({ balance: state.balance + amount })),
+  );
+  type SingleEvent = Expect<Equal<SourceEvent<typeof Single>, ReturnType<typeof Deposited>>>;
+  const Multiple = view(
+    'Multiple', { from: FactoryAccount, initial },
+    on(Opened, state => state),
+    on(Deposited, (state, { amount }) => ({ balance: state.balance + amount })),
+  );
+  type FactoryEvents = Expect<Equal<SourceEvent<typeof Multiple>, { readonly _tag: 'Opened' } | { readonly _tag: 'Deposited' }>>;
 }
 
 const Rules = service('Rules', { maximum: integer });
@@ -345,4 +403,28 @@ async function effectModelInference() {
   });
 
   Effect.runPromise(Effect.provide(program, Layer.succeed(effectify(DepositRules), { maximum: 1_000 })));
+}
+
+async function effectModelLayerInference() {
+  const { Bank: BankModel, DepositRules } = await import('../examples/bank/domain.js');
+  const Bank = effectify(BankModel, 'Bank');
+  type BankLayerRequirements = Expect<Equal<Layer.Services<typeof Bank.layer>, Requirement<typeof DepositRules>>>;
+  const RulesLive = Layer.succeed(effectify(DepositRules), { maximum: 1_000 });
+  const BankLive = Bank.layer.pipe(Layer.provide(RulesLive));
+
+  const program = Effect.gen(function* () {
+    const bank = yield* Bank;
+    // @ts-expect-error The named service retains the model's method types.
+    bank.account.deposit('a', '100');
+    const receipt = yield* bank.account.deposit('a', 100);
+    type BankLayerReply = Expect<Equal<typeof receipt.reply.balance, number>>;
+    return receipt;
+  });
+
+  // @ts-expect-error The bank layer requires deposit rules.
+  Effect.runPromise(Effect.provide(program, Bank.layer));
+  const OtherBank = effectify(BankModel, 'OtherBank');
+  // @ts-expect-error A different service name does not provide Bank.
+  Effect.runPromise(Effect.provide(program, OtherBank.layer.pipe(Layer.provide(RulesLive))));
+  Effect.runPromise(Effect.provide(program, BankLive));
 }

@@ -1,5 +1,5 @@
 /** Optional Effect v4 integration. No core module imports this entry point. */
-import { Cause, Context, Effect, Exit, Result as EffectResult } from 'effect';
+import { Cause, Context, Effect, Exit, Layer, Result as EffectResult } from 'effect';
 import {
   EffectBody, type AdaptedBody, type AnyCommand, type AnyDependency, type CommandDecision,
   type ContextOf, type EventsOf, type InputOf, type RejectionsOf, type ReplyOf, type Requirement,
@@ -25,6 +25,12 @@ type EffectCalls<T> = T extends (...args: infer Args) => Promise<infer R>
     : T
   : T extends (...args: never[]) => unknown ? T : EffectMethods<T>;
 export type EffectRuntime<M extends AnyModel> = EffectMethods<Runtime<M>>;
+declare const ModelServiceName: unique symbol;
+type ModelServiceId<N extends string> = { readonly [ModelServiceName]: N };
+export type EffectModelService<M extends AnyModel, N extends string> =
+  Context.Service<ModelServiceId<N>, EffectRuntime<M>> & {
+    readonly layer: Layer.Layer<ModelServiceId<N>, Unexpected, UsedRequirements<ModelUses<M>>>;
+  };
 
 function liftCall(call: (...args: any[]) => Promise<Result<unknown, Tagged>>) {
   return (...args: unknown[]) => Effect.gen(function* () {
@@ -65,6 +71,7 @@ function effectifyModel(definition: AnyModel) {
   });
 }
 
+export function effectify<M extends AnyModel, const N extends string>(definition: M, name: N): EffectModelService<M, N>;
 export function effectify<M extends AnyModel>(definition: M): Effect.Effect<EffectRuntime<M>, Unexpected, UsedRequirements<ModelUses<M>>>;
 export function effectify<D extends AnyDependency>(definition: D): Context.Service<Requirement<D>, ServiceOf<D>>;
 export function effectify<C extends AnyCommand>(definition: C): (
@@ -73,8 +80,13 @@ export function effectify<C extends AnyCommand>(definition: C): (
 export function effectify<Args extends readonly unknown[], A, E extends Tagged, R>(
   body: (...args: Args) => Effect.Effect<A, E, R>,
 ): AdaptedBody<Args, A, E, R>;
-export function effectify(value: any): any {
-  if (value.kind === 'model') return effectifyModel(value);
+export function effectify(value: any, name?: string): any {
+  if (value.kind === 'model') {
+    const acquire = effectifyModel(value);
+    if (name === undefined) return acquire;
+    const key = Context.Service<ModelServiceId<string>, Record<string, unknown>>(`@marcelsud/accord-model/${name}`);
+    return Object.assign(key, { layer: Layer.effect(key, acquire) });
+  }
   if (value.kind === 'service' || value.kind === 'external') return serviceKey(value);
   if (value.kind === 'command') {
     return (...args: unknown[]) => Effect.gen(function* () {

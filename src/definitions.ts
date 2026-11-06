@@ -1,6 +1,6 @@
 import { createFactoryAggregate, type AggregateContext, type AggregateMethods, type AnyFactoryAggregate, type FactoryAggregate } from './factory-aggregate.js';
 import { createAggregateClass, type AggregateClass, type AnyAggregateClass } from './class-aggregate.js';
-import { object, parse, type Infer, type Schema, type SchemaInput, type Shape } from './schema.js';
+import { object, parse, unknown as unknownSchema, type Infer, type Schema, type SchemaInput, type Shape } from './schema.js';
 import { fail, ok, unexpected, type InvalidInput, type Result, type Tagged, type Unexpected } from './result.js';
 
 export type MaybePromise<T> = T | PromiseLike<T>;
@@ -320,14 +320,76 @@ export interface View<N extends string, S, From extends Source, E extends Tagged
   readonly evolve: (state: S, event: E, envelope: Envelope<E>) => S;
 }
 export type AnyView = View<string, any, any, any>;
+export interface ViewHandler<S, F extends AnyEvent> {
+  readonly event: F;
+  readonly evolve: (state: S, event: ReturnType<F>, envelope: Envelope<ReturnType<F>>) => S;
+}
+export function on<S, F extends AnyEvent>(event: F, evolve: ViewHandler<NoInfer<S>, NoInfer<F>>['evolve']): ViewHandler<S, F> {
+  return { event, evolve };
+}
+type ViewOptions<F extends Source, S extends object, E extends Tagged, Validation extends SchemaInput> = {
+  readonly from: F; readonly initial: S; readonly version?: number;
+  readonly schema?: Validation & ([Infer<Validation>] extends [NoInfer<S>] ? unknown : never);
+  readonly keyOf?: (envelope: Envelope<NoInfer<E>>) => string | readonly string[] | undefined;
+};
+type SourceEventsWithTags<F extends Source, T extends string> = Tagged extends SourceEvent<F>
+  ? { [Tag in T]: { readonly _tag: Tag } }[T]
+  : Extract<SourceEvent<F>, { readonly _tag: T }>;
+type SourceViewHandler<S, F extends Source, T extends string> = ViewHandler<NoInfer<S>, any> & {
+  readonly event: AnyEvent & Schema<SourceEvent<NoInfer<F>>> & { readonly name: T };
+};
+export function view<
+  const N extends string, const F extends Source, S extends object,
+  const E extends AnyEvent & Schema<SourceEvent<NoInfer<F>>>, const Validation extends SchemaInput = SchemaInput,
+>(
+  name: N, options: ViewOptions<F, S, ReturnType<E>, Validation>,
+  handler: ViewHandler<NoInfer<S>, any> & { readonly event: E },
+): View<N, S, F, ReturnType<E>>;
+export function view<
+  const N extends string, const F extends Source, S extends object, const T extends string,
+  const Validation extends SchemaInput = SchemaInput,
+>(
+  name: N, options: ViewOptions<F, S, SourceEventsWithTags<F, T>, Validation>,
+  ...handlers: [SourceViewHandler<S, F, T>, ...SourceViewHandler<S, F, T>[]]
+): View<N, S, F, SourceEventsWithTags<F, T>>;
 export function view<const N extends string, const F extends Source, const S extends SchemaInput, const On extends readonly AnyEvent[]>(
   name: N, contract: {
     readonly from: F; readonly state: S; readonly initial: () => Infer<S>; readonly version?: number;
     readonly on: On & readonly Schema<SourceEvent<F>>[];
     readonly keyOf?: (envelope: Envelope<Values<On>>) => string | readonly string[] | undefined;
   }, evolve: (state: Infer<S>, event: Values<On>, envelope: Envelope<Values<On>>) => Infer<S>,
-): View<N, Infer<S>, F, Values<On>> {
-  return { kind: 'view', name, ...contract, version: contract.version ?? 1, keyOf: contract.keyOf ?? (envelope => envelope.source.id), evolve };
+): View<N, Infer<S>, F, Values<On>>;
+export function view(
+  name: string, options: (Pick<AnyView, 'from'> & Partial<Pick<AnyView, 'version' | 'keyOf'>>) & (
+    Pick<AnyView, 'state' | 'initial' | 'on'> | { readonly initial: object; readonly schema?: SchemaInput }
+  ), ...handlers: [AnyView['evolve']] | ViewHandler<any, AnyEvent>[]
+): AnyView {
+  const { from, version = 1, keyOf = envelope => envelope.source.id } = options;
+  const definition = { kind: 'view' as const, name, from, version, keyOf };
+  if ('on' in options && typeof handlers[0] === 'function') {
+    return { ...definition, state: options.state, initial: options.initial, on: options.on, evolve: handlers[0] };
+  }
+  if ('on' in options || handlers.length === 0) throw new TypeError('A view requires at least one event handler');
+  const byTag = new Map<string, ViewHandler<any, AnyEvent>>();
+  for (const handler of handlers) {
+    if (typeof handler === 'function' || handler?.event?.kind !== 'event' || typeof handler.evolve !== 'function') {
+      throw new TypeError('Expected an on() handler');
+    }
+    const tag = handler.event.name;
+    if (byTag.has(tag)) throw new TypeError(`Duplicate view handler: ${tag}`);
+    byTag.set(tag, handler);
+  }
+  const state = options.schema ?? unknownSchema;
+  const defaults = structuredClone(parse(state, options.initial));
+  return {
+    ...definition, state, initial: () => structuredClone(defaults),
+    on: [...byTag.values()].map(handler => handler.event),
+    evolve(state, event, envelope) {
+      const handler = byTag.get(event._tag);
+      if (!handler) throw new TypeError(`Missing view handler: ${event._tag}`);
+      return handler.evolve(state, event, envelope);
+    },
+  };
 }
 export interface Consumer<N extends string, K extends 'policy' | 'projection', E extends Tagged, U extends Uses> {
   readonly kind: K; readonly name: N; readonly from: Source; readonly on: readonly AnyTaggedFactory[];

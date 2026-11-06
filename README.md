@@ -207,18 +207,21 @@ from the runtime; HTTP callers cannot provide an actor or dependency bindings.
 
 ## Add optional Effect integration
 
-Install Effect separately. `effectify(Bank)` resolves declared services from
-Effect's environment and returns a client whose calls are lazy Effects.
+Install Effect separately. `effectify(BankModel, "Bank")` creates an Effect
+service key. Its `layer` resolves the model's declared dependencies and builds
+a client whose calls are lazy Effects.
 
 ```ts
 import { Effect, Layer } from "effect";
 import { effectify } from "@marcelsud/accord/effect";
-import { Bank, DepositRules } from "./domain.js";
+import { Bank as BankModel, DepositRules } from "./domain.js";
 
+const Bank = effectify(BankModel, "Bank");
 const RulesLive = Layer.succeed(effectify(DepositRules), { maximum: 1_000 });
+const BankLive = Bank.layer.pipe(Layer.provide(RulesLive));
 
 const program = Effect.gen(function* () {
-  const bank = yield* effectify(Bank);
+  const bank = yield* Bank;
   const id = "a-1";
 
   yield* bank.account.open(id);
@@ -226,7 +229,7 @@ const program = Effect.gen(function* () {
   return yield* bank.summary.get(id, { atLeast: receipt });
 });
 
-const summary = await Effect.runPromise(Effect.provide(program, RulesLive));
+const summary = await Effect.runPromise(Effect.provide(program, BankLive));
 ```
 
 Use `effectify(Dependency)` to get a stable Effect service key. Use
@@ -242,7 +245,7 @@ requirements. See the [Effect bank example](examples/bank/with-effect.ts) and th
 | `aggregate(name, initialState)` | Class base with inferred state, factories, and event collection |
 | `aggregate(name, initialState, factory)` | Methods share a context and use one state shape for working and stored data |
 | `aggregate(name, contract, evolve)` | `(state, event) => state`; infers events from commands |
-| `view(name, contract, evolve)` | `(state, event, envelope) => state`; replays history, supports routing and versions |
+| `view(name, { from, initial }, on(Event, handler), ...)` | Folds events into inferred state with optional routing and replay versions |
 | `policy(name, contract, body)` | `(envelope, ctx) => Result`; handles new events only |
 | `projection(name, contract, body)` | `(batch, ctx) => Result`; replayable, idempotent writes |
 | `external(name, contract, body)` | `(input, ctx) => Result`; `.implement(services)` binds an adapter |

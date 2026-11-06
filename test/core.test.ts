@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   aggregate, command, event, external, fail, wire, integer, literal, match, memory, model, nullable, number,
-  object, ok, optional, parse, policy, projection, rejection, service, stream, string, trycatch, unexpected,
+  object, ok, on, optional, parse, policy, projection, rejection, service, stream, string, trycatch, unexpected,
   union, view, type Result, type Tagged,
 } from '../src/index.js';
 import { Account, AlreadyOpen, Balance, Bank, Cents, Deposited, InsufficientFunds, NotOpen, Opened, State, Withdrawn, deposit, open } from './fixtures.js';
@@ -172,6 +172,38 @@ test('view versions rebuild from full history and model names isolate storage', 
   assert.deepEqual(success(await changed.summary.get('a')), { balance: 20 });
   const other = wire(model('OtherBank', { aggregates: { account: Account } }), { storage });
   assert.deepEqual(success(await other.account.get('a')), { open: false, balance: 0 });
+});
+
+test('standalone view handlers replay in order for each row after a version change', async () => {
+  const storage = memory();
+  const balances = (version: number) => view(
+    'Balances', { from: Account, initial: { balance: 0 }, schema: Balance, version },
+    on(Opened, state => ({ balance: state.balance + version })),
+    on(Deposited, (state, { amount }, envelope) => {
+      assert.equal(envelope.event.amount, amount);
+      return { balance: state.balance + amount };
+    }),
+    on(Withdrawn, (state, { amount }) => ({ balance: state.balance - amount })),
+  );
+  const connect = (version: number) => wire(model('ReplayBank', {
+    aggregates: { account: Account }, views: { balances: balances(version) },
+  }), { storage });
+  const original = connect(1);
+  success(await original.account.open('a', {}));
+  success(await original.account.open('b', {}));
+  success(await original.account.deposit('a', { amount: 10 }));
+  success(await original.account.withdraw('a', { amount: 3 }));
+  success(await original.flush());
+  assert.deepEqual(success(await original.balances.get('a')), { balance: 8 });
+
+  const rebuilt = connect(2);
+  success(await rebuilt.flush());
+  success(await rebuilt.flush());
+  assert.deepEqual(success(await rebuilt.balances.get('a')), { balance: 9 });
+  assert.deepEqual(success(await rebuilt.balances.get('b')), { balance: 2 });
+  const events = success(await rebuilt.balances.events('a'));
+  assert.deepEqual(events.map(({ event }) => event._tag), ['Opened', 'Deposited', 'Withdrawn']);
+  assert.ok(events.every(envelope => envelope.replay));
 });
 
 test('policies start with new events and failed deliveries remain pending', async () => {

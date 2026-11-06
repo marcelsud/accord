@@ -5,6 +5,9 @@ methods. The initial state contains a status string and a balance in cents.
 The deposit method uses `Balance.of()` for arithmetic and writes the resulting
 cents back to state. [Domain definition](domain.ts)
 
+Both runners share the same balance view. Its `on(Deposited, handler)` takes
+the new balance from the event, and `initial` supplies the view's state type.
+
 `wire(Bank, { services })` supplies the deposit rules and adds the account ID to
 the methods.
 `bank.account.deposit("a-1", 100)` commits the updated snapshot and emitted
@@ -24,9 +27,10 @@ at the command receipt. It prints account state as
 The runner also deposits 100 into `SavingsAccount`, which holds its balance in
 `{ balance: { cents: 100 } }`. It passes that state to `SavingsAccount.create()`
 and previews a second deposit locally, which returns a balance of 150.
-[`with-effect.ts`](with-effect.ts) provides `DepositRules` through a
-`Layer.succeed` layer. Inside `Effect.gen`, `yield* effectify(Bank)` binds the
-rules, and each bank call is yielded directly. It prints `{ balance: 100 }`.
+[`with-effect.ts`](with-effect.ts) creates a named service with
+`effectify(BankModel, "Bank")` and provides `DepositRules` to `Bank.layer`.
+Inside `Effect.gen`, `yield* Bank` gets the wired client. Each bank call is
+yielded directly. It prints `{ balance: 100 }`.
 
 For a standalone test, supply the starting state directly to `Account.create()`.
 Call the method and inspect the resulting state and events.

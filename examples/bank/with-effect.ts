@@ -1,11 +1,14 @@
 import { Effect, Layer } from "effect";
 import { effectify } from "@marcelsud/accord/effect";
-import { Bank, DepositRules } from "./domain.js";
+import { Bank as BankModel, DepositRules } from "./domain.js";
 
+const Bank = effectify(BankModel, "Bank");
 const RulesLive = Layer.succeed(effectify(DepositRules), { maximum: 1_000 });
 
+const BankLive = Bank.layer.pipe(Layer.provide(RulesLive));
+
 const program = Effect.gen(function* () {
-  const bank = yield* effectify(Bank);
+  const bank = yield* Bank;
   const id = "a-1";
 
   yield* bank.account.open(id);
@@ -13,5 +16,5 @@ const program = Effect.gen(function* () {
   return yield* bank.summary.get(id, { atLeast: receipt });
 });
 
-const summary = await Effect.runPromise(Effect.provide(program, RulesLive));
+const summary = await Effect.runPromise(Effect.provide(program, BankLive));
 console.log(summary); // { balance: 100 }

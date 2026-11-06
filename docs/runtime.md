@@ -117,12 +117,29 @@ supported for independently declared commands.
 
 ## Views, projections, and policies
 
-`view(name, { from, on, state, initial, version?, keyOf? }, evolve)` folds selected
-events into state. The default key is the source instance ID. `keyOf(envelope)`
-can return a string, several strings, or `undefined`. Returning multiple keys
-updates each key; `undefined` ignores the input. Downstream views consume the
-forwarded source events. This version does not define custom view-emitted event
-schemas; use an explicit stream for a separate event contract.
+Use `view()` with a plain initial value and one `on()` handler per event. In
+the bank example, `Summary` uses the balance reported by `Deposited`.
+
+```ts
+const Summary = view(
+  "Summary",
+  { from: Account, initial: { balance: 0 } },
+  on(Deposited, (_state, { balance }) => ({ balance })),
+);
+```
+
+Each handler receives the current row state, the event, and its envelope. It
+returns the next state synchronously so the same handler can run during replay.
+Add `schema` to validate state at runtime. Increment `version` to rebuild
+the view from source history.
+
+Views use the source instance ID as the default row key. `keyOf(envelope)`
+can return a string, several strings, or `undefined` to skip the event.
+When a view listens to multiple events from a class or factory aggregate,
+`keyOf` infers their tags. Each `on()` handler still infers its full payload.
+Downstream views consume the forwarded source events. The contract form
+`view(name, { from, on, state, initial, version?, keyOf? }, evolve)` is also
+supported.
 
 `policy(name, { from, on, uses? }, body)` receives one envelope at a time.
 Envelopes include `id`, `stream`, `seq`, `at`, `source`, and `event`. Policies are
@@ -291,11 +308,15 @@ Stored domain data must support `structuredClone`. HTTP data must additionally
 round-trip through JSON. Instance IDs and schema-backed domain values are
 strings, numbers, booleans, arrays, and records in the bundled examples.
 
-Effect support targets v4.1.2 or newer in the v4 line. Use
-`yield* effectify(Bank)` to resolve all declared model dependencies and acquire
-an in-process client. Provide the dependencies with Effect layers using keys
-from `effectify(Dependency)`. Acquiring the model builds a runtime with its own
-in-memory store.
+Effect support targets v4.1.2 or newer in the v4 line.
+`effectify(BankModel, "Bank")` returns a named Effect service key with a
+`layer`. The layer requires the model's declared dependencies. Supply them
+with layers built from `effectify(Dependency)` keys. Effects that yield the
+same service from one layer provision share a runtime and its in-memory
+store. Use distinct names for distinct model services.
+
+For direct acquisition in a generator, `yield* effectify(BankModel)` resolves
+dependencies and builds an in-process client.
 
 Calls that normally return a promise of an Accord tuple become lazy Effects.
 The successful tuple value becomes the Effect result, and its error becomes a
