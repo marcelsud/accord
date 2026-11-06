@@ -98,10 +98,12 @@ const Account = aggregate(
 
 `snapshot` receives working state and returns cloneable data. `restore` receives
 a copy of that data and builds fresh working state, including any value objects.
-Defaults are captured through `snapshot` when the aggregate is defined. Return
-the same method names for every state. `wire()` creates a temporary instance to
-discover the names, then creates an isolated instance for each managed call.
-Keep factory setup free of external side effects.
+Defaults are captured through `snapshot` when the aggregate is defined.
+`wire()` resolves methods lazily. Each call restores an isolated instance and
+runs the factory once, then looks up the requested method. A missing method
+returns `Unexpected`. TypeScript infers the method signatures from the factory's
+return type. `Object.keys()` lists the client's read helpers, while method names
+come from the factory at invocation time.
 
 `Account.create()` uses the defaults, and `Account.restore(snapshot)` starts
 from supplied data. Both give you local methods and a fresh event buffer.

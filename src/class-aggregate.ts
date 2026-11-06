@@ -8,8 +8,12 @@ export function cloneEmittedEvent<E extends Tagged>(event: E): E {
   return copy;
 }
 
+export function isReservedAggregateMethod(name: string): boolean {
+  return ['get', 'events', 'getState', 'pullEvents', 'emit', 'constructor', '__proto__', 'prototype', 'then'].includes(name);
+}
+
 export function checkAggregateMethodName(name: string): void {
-  if (['get', 'events', 'getState', 'pullEvents', 'emit', 'constructor', '__proto__', 'prototype', 'then'].includes(name)) {
+  if (isReservedAggregateMethod(name)) {
     throw new TypeError(`Reserved aggregate method name: ${name}`);
   }
 }

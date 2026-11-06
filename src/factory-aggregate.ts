@@ -1,4 +1,4 @@
-import { checkAggregateMethodName, cloneEmittedEvent } from './class-aggregate.js';
+import { cloneEmittedEvent, isReservedAggregateMethod } from './class-aggregate.js';
 import type { Tagged } from './result.js';
 
 export interface AggregateContext<S extends object> {
@@ -24,6 +24,10 @@ export interface FactoryAggregate<N extends string, P extends object, M extends 
 
 export type AnyFactoryAggregate = FactoryAggregate<string, any, AggregateMethods>;
 
+export function isReservedFactoryMethod(name: string): boolean {
+  return name === 'toJSON' || isReservedAggregateMethod(name);
+}
+
 export function createFactoryAggregate<N extends string, S extends object, P extends object, M extends AggregateMethods>(
   name: N, initial: S, factory: (ctx: AggregateContext<S>) => M, codec: AggregateStateCodec<S, P>,
 ): FactoryAggregate<N, P, M> {
@@ -34,7 +38,7 @@ export function createFactoryAggregate<N extends string, S extends object, P ext
     const methods = factory({ state, emit: event => events.push(cloneEmittedEvent(event)) });
     const instance = Object.create(null);
     for (const [name, method] of Object.entries(methods)) {
-      checkAggregateMethodName(name);
+      if (isReservedFactoryMethod(name)) throw new TypeError(`Reserved aggregate method name: ${name}`);
       if (typeof method !== 'function') throw new TypeError(`Expected an aggregate method: ${name}`);
       instance[name] = method;
     }

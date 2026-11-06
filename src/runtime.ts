@@ -1,6 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
 import { classMethods, type AnyAggregateClass } from './class-aggregate.js';
-import type { FactoryAggregate } from './factory-aggregate.js';
+import { isReservedFactoryMethod, type FactoryAggregate } from './factory-aggregate.js';
 import { parse, type Infer, type SchemaInput } from './schema.js';
 import { fail, ok, unexpected, type InvalidInput, type Result, type ResultError, type ResultValue, type Tagged, type Unexpected } from './result.js';
 import {
@@ -289,6 +289,7 @@ export function wire<M extends AnyModel>(definition: M, ...options: keyof ModelS
   output.flush = flush;
   for (const [alias, aggregate] of Object.entries(definition.aggregates) as Array<[string, AggregateDefinition]>) {
     const client: Record<string, any> = Object.create(null);
+    let exposed = client;
     const aggregateName = nameOf(aggregate);
     type Decision = { readonly events: readonly Tagged[]; readonly reply?: unknown; readonly state?: unknown };
     const execute = (
@@ -348,10 +349,8 @@ export function wire<M extends AnyModel>(definition: M, ...options: keyof ModelS
           schemas.set(factory.name, factory);
         }
       }
-      const methods = aggregate.kind === 'class-aggregate' ? classMethods(aggregate)
-        : new Map(Object.keys(aggregate.create()).map(name => [name, undefined]));
-      for (const [name, prototypeMethod] of methods) {
-        client[name] = (id: string, ...args: unknown[]) => execute(id, name, args, {}, async state => {
+      const methodClient = (name: string, prototypeMethod?: (...args: unknown[]) => unknown) =>
+        (id: string, ...args: unknown[]) => execute(id, name, args, {}, async state => {
           const instance = aggregate.kind === 'class-aggregate' ? new aggregate(structuredClone(state)) : aggregate.restore(state);
           const method = prototypeMethod ?? Object.getOwnPropertyDescriptor(instance, name)?.value;
           if (typeof method !== 'function') throw new TypeError(`Missing aggregate method: ${name}`);
@@ -361,6 +360,22 @@ export function wire<M extends AnyModel>(definition: M, ...options: keyof ModelS
           if (error !== null) return fail(error);
           const events = instance.pullEvents().map(event => schemas.get(event._tag)?.parse(event) ?? event);
           return ok({ state: instance.getState(), events, reply });
+        });
+      if (aggregate.kind === 'class-aggregate') {
+        for (const [name, method] of classMethods(aggregate)) client[name] = methodClient(name, method);
+      } else {
+        const methods = new Map<string, ReturnType<typeof methodClient>>();
+        exposed = new Proxy(client, {
+          get(target, name) {
+            if (Object.hasOwn(target, name)) return Reflect.get(target, name);
+            if (typeof name !== 'string' || isReservedFactoryMethod(name)) return undefined;
+            let method = methods.get(name);
+            if (!method) {
+              method = methodClient(name);
+              methods.set(name, method);
+            }
+            return method;
+          },
         });
       }
     } else {
@@ -374,7 +389,7 @@ export function wire<M extends AnyModel>(definition: M, ...options: keyof ModelS
       catch (cause) { return fail(unexpected(cause)); }
     };
     client.events = async (id: string, readOptions: { after?: number } = {}) => ok(structuredClone(store.rows.get(key(aggregateName, id))?.events.filter(event => event.seq > (readOptions.after ?? 0)) ?? []));
-    output[alias] = client;
+    output[alias] = exposed;
   }
   for (const [alias, view] of Object.entries(definition.views) as Array<[string, AnyView]>) {
     const rowKey = (id: string) => key(view.name, view.version, id);
