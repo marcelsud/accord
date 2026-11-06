@@ -1,10 +1,71 @@
 # Runtime and transport reference
 
-All examples are excerpts. The bank definitions come from
-[`examples/bank/pure.ts`](../examples/bank/pure.ts). Public exports are available from
-`@marcelsud/accord`; only the adapter imports `@marcelsud/accord/effect`.
+All examples are excerpts. The class bank is defined in
+[`examples/bank/domain.ts`](../examples/bank/domain.ts). The HTTP and history
+examples below use an event-evolved bank with explicitly declared commands.
 
-## Commands and state
+## Class aggregates
+
+Extend `aggregate(name, initialState)` and define ordinary prototype methods.
+Accord infers the type of protected `this.state` from the initial value. Give
+empty collections and nullable fields a type annotation when their defaults
+cannot express the full type. Keep persisted data in `this.state` and use values
+that round-trip through `structuredClone`.
+
+`Account.create()` copies the defaults. `Account.restore(state)` copies supplied
+state and starts with an empty event buffer. Both return an `Account` instance.
+`getState()` returns a copy, and `pullEvents()` drains the pending events.
+Direct method calls mutate the local instance. The runtime provides the commit
+boundary for stored accounts.
+
+Register the class with `model()` and pass the model to `wire()`. The typed client
+exposes prototype methods that return an `ok()` or `fail()` tuple, synchronously
+or asynchronously. It prepends the instance ID and forwards the remaining
+arguments to the method. Input checks belong in the method or its caller.
+
+```ts
+const bank = wire(Bank);
+const [, openError] = await bank.account.open("a-1");
+if (openError !== null) throw openError;
+
+const [receipt, error] = await bank.account.deposit("a-1", 100);
+if (error !== null) throw error;
+
+const [state, readError] = await bank.account.get("a-1");
+if (readError !== null) throw readError;
+const preview = Account.restore(state);
+const [reply, previewError] = preview.deposit(50);
+if (previewError !== null) throw previewError;
+
+console.log(receipt.reply.balance); // 100
+console.log(reply.balance); // 150
+```
+
+Calls for an ID run in order. Each call starts from a copy of stored state or the
+defaults for a fresh ID. The runtime checks the returned tuple. A successful
+call saves state, emitted events, and a receipt together. A rejection, exception,
+or failed clone discards the working instance. `bank.account.get(id)` reads
+stored state, defaulting to the initial value for a fresh ID.
+`bank.account.events(id, { after })` reads committed envelopes after an event
+sequence number.
+
+Views, policies, and projections subscribe to a class with
+`{ from: Account, on: [Deposited] }`. The event factories in `on` supply the
+consumer types and validate matching events before commit. Policies and
+projections receive those events when `flush()` delivers them.
+
+A class receipt has two positions. `version` counts successful calls.
+`eventCursor` is the last committed event sequence, including earlier events
+when a method emits nothing. Pass the receipt to
+`bank.summary.get(id, { atLeast: receipt })` to catch up the view to that event
+position.
+
+Class methods are available through the in-process client. HTTP exposure uses
+explicitly registered `command()` definitions. A class test can start from
+`Account.restore(state)` and inspect the resulting state and pending events
+directly.
+
+## Event-evolved commands
 
 Declare an aggregate contract as `{ state, commands }`. Each command entry
 declares `input`, `events`, and optional `rejects`, `reply`, and `uses`.
@@ -83,8 +144,8 @@ The body receives `run.services` and:
 
 - `run.step(name, task, { compensate? })`: saves successful results and reuses
   them on another invocation. The task receives a stable `commandId` and
-  `idempotencyKey`. Forward them to commands executed through the runtime and
-  external adapters.
+  `idempotencyKey`. Pass the command ID to contract-based command calls and the
+  idempotency key to external adapters.
 - `run.wait(name, schema)`: waits for a named, validated signal. Send it through
   `bank.workflows.alias.signal(runKey, name, value)`.
 - `run.sleep(name, milliseconds)`: records an in-memory deadline and waits for it.
@@ -170,8 +231,8 @@ rejects every unlisted command.
 
 `story(model, async test => { ... }, options?)` supplies `test.bank`,
 `test.given`, and `test.equal`. It converts thrown assertions to `Unexpected`.
-`test.given(aggregate, id, events)` validates and folds history into a fresh
-instance and returns a tuple. Seeded events rebuild projections and views but
+`test.given(aggregate, id, events)` seeds an event-evolved aggregate. It validates
+and folds the history into a fresh instance and returns a tuple. Seeded events rebuild projections and views but
 do not execute policies.
 
 ```ts

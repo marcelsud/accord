@@ -1,5 +1,7 @@
 import {
-  boolean,
+  aggregate,
+  fail,
+  ok,
   event,
   integer,
   refine,
@@ -15,8 +17,6 @@ import {
 } from "@marcelsud/accord";
 
 export const Cents = refine(integer, (value) => value > 0, "positive cents");
-export const State = { open: boolean, balance: integer };
-export const Balance = { balance: integer };
 export const Opened = event("Opened");
 export const Deposited = event("Deposited", {
   amount: Cents,
@@ -29,22 +29,25 @@ export const NotificationConflict = rejection("NotificationConflict", {
   eventId: string,
 });
 
-export const AccountContract = {
-  state: State,
-  commands: {
-    open: {
-      input: {},
-      events: [Opened],
-      rejects: [AlreadyOpen],
-    },
-    deposit: {
-      input: { amount: Cents },
-      events: [Deposited],
-      rejects: [NotOpen],
-      reply: Balance,
-    },
-  },
-};
+export class Account extends aggregate("Account", { open: false, balance: 0 }) {
+  open() {
+    if (this.state.open) return fail(AlreadyOpen());
+
+    this.state.open = true;
+    this.emit(Opened());
+    return ok(undefined);
+  }
+
+  deposit(amount: number) {
+    if (!this.state.open) return fail(NotOpen());
+
+    const event = Deposited({ amount, balance: this.state.balance + amount });
+    this.state.balance = event.balance;
+    this.emit(event);
+    return ok({ balance: event.balance });
+  }
+}
+
 export const Notification = {
   eventId: string,
   accountId: string,

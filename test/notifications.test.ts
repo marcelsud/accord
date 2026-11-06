@@ -32,8 +32,8 @@ for (const [mode, createBank, createNotifications] of [['pure', createPureBank, 
       },
     };
     const { bank } = createBank(ledger, notifications);
-    success(await bank.account.open('a-1', {}));
-    const receipt = success(await bank.account.deposit('a-1', { amount: 100 }));
+    success(await bank.account.open('a-1'));
+    const receipt = success(await bank.account.deposit('a-1', 100));
     success(await bank.flush());
     assert.deepEqual(sent, [receipt.events[0]!.id]);
     assert.equal(success(ledger.list()).length, 1);
@@ -46,8 +46,8 @@ for (const [mode, createBank, createNotifications] of [['pure', createPureBank, 
     {
       using ledger = openLedger(temporary.filename);
       const { bank, projection } = createBank(ledger, createNotifications(notificationSystem.url));
-      success(await bank.account.open(accountId, {}));
-      const receipt = success(await bank.account.deposit(accountId, { amount: 100 }, { commandId: 'deposit-1' }));
+      success(await bank.account.open(accountId));
+      const receipt = success(await bank.account.deposit(accountId, 100));
       assert.deepEqual(success(ledger.list()), []);
       success(await bank.flush());
       const rows = success(ledger.list(accountId));
@@ -63,7 +63,6 @@ for (const [mode, createBank, createNotifications] of [['pure', createPureBank, 
       success(await projection.handle(replay, { ledger }));
       assert.deepEqual(success(ledger.list(accountId)), rows);
 
-      assert.deepEqual(success(await bank.account.deposit(accountId, { amount: 100 }, { commandId: 'deposit-1' })), receipt);
       success(await bank.flush());
       assert.equal(success(ledger.list()).length, 1);
       assert.equal(notificationSystem.attempts, 1);
@@ -77,8 +76,8 @@ for (const [mode, createBank, createNotifications] of [['pure', createPureBank, 
     using ledger = openLedger();
     await using notificationSystem = await startDummyNotifications({ failFirstAfterAccept: true });
     const { bank } = createBank(ledger, createNotifications(notificationSystem.url));
-    success(await bank.account.open('a-1', {}));
-    success(await bank.account.deposit('a-1', { amount: 100 }));
+    success(await bank.account.open('a-1'));
+    success(await bank.account.deposit('a-1', 100));
     assert.deepEqual(failure(await bank.flush()), NotificationsUnavailable());
     assert.equal(notificationSystem.attempts, 1);
     assert.equal(notificationSystem.received.size, 1);

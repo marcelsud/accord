@@ -1,3 +1,4 @@
+import { createAggregateClass, type AggregateClass, type AnyAggregateClass } from './class-aggregate.js';
 import { object, parse, type Infer, type Schema, type SchemaInput, type Shape } from './schema.js';
 import { fail, ok, unexpected, type InvalidInput, type Result, type Tagged, type Unexpected } from './result.js';
 
@@ -258,10 +259,15 @@ export interface AnyAggregate {
   readonly initial: () => any; readonly commands: Record<string, AnyCommand>;
   readonly events: readonly AnyTaggedFactory[]; readonly evolve: (state: any, event: any) => any;
 }
+export type AggregateDefinition = AnyAggregate | AnyAggregateClass;
+export function aggregate<const N extends string, S extends object>(name: N, initial: S): AggregateClass<N, S>;
 export function aggregate<const N extends string, const S extends SchemaInput, const C extends Record<string, Command<Infer<S>, any, any, any, any, any>>>(
   name: N, contract: { readonly state: S; readonly initial: () => Infer<S>; readonly commands: C },
   evolve: (state: Infer<S>, event: EventsOf<C[keyof C]>) => Infer<S>,
-): Aggregate<N, Infer<S>, C> {
+): Aggregate<N, Infer<S>, C>;
+export function aggregate(name: string, initial: object, evolve?: AnyAggregate['evolve']): AggregateDefinition {
+  if (evolve === undefined) return createAggregateClass(name, initial);
+  const contract = initial as Pick<AnyAggregate, 'state' | 'initial' | 'commands'>;
   for (const key of Object.keys(contract.commands)) if (['get', 'events', 'constructor', '__proto__', 'prototype', 'then'].includes(key)) throw new TypeError(`Reserved command name: ${key}`);
   for (const [name, command] of Object.entries(contract.commands)) {
     const origin = commandOrigins.get(command);
@@ -287,8 +293,8 @@ export interface Envelope<E extends Tagged = Tagged> {
   readonly source: { readonly type: string; readonly id: string };
   readonly event: E;
 }
-export type Source = AnyAggregate | AnyView;
-export type SourceEvent<S> = S extends Aggregate<any, any, infer C> ? EventsOf<C[keyof C]> : S extends View<any, any, any, infer E> ? E : never;
+export type Source = AggregateDefinition | AnyView;
+export type SourceEvent<S> = S extends AnyAggregateClass ? Tagged : S extends Aggregate<any, any, infer C> ? EventsOf<C[keyof C]> : S extends View<any, any, any, infer E> ? E : never;
 export interface View<N extends string, S, From extends Source, E extends Tagged> {
   readonly kind: 'view'; readonly name: N; readonly from: From;
   readonly state: SchemaInput; readonly initial: () => S; readonly version: number;

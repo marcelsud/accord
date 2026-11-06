@@ -1,38 +1,45 @@
 import { isDeepStrictEqual } from 'node:util';
+import { classMethods, type AnyAggregateClass } from './class-aggregate.js';
 import { parse, type Infer, type SchemaInput } from './schema.js';
-import { fail, ok, unexpected, type InvalidInput, type Result, type Tagged, type Unexpected } from './result.js';
+import { fail, ok, unexpected, type InvalidInput, type Result, type ResultError, type ResultValue, type Tagged, type Unexpected } from './result.js';
 import {
-  type Aggregate, type AnyAggregate, type AnyCommand, type AnyConsumer, type AnyView, type ContextOf,
+  tuple, type Aggregate, type AggregateDefinition, type AnyAggregate, type AnyCommand, type AnyTaggedFactory, type AnyConsumer, type AnyView, type ContextOf,
   type Dependency, type Envelope, type ExecutionContext, type InputOf, type RejectionsOf, type ReplyOf,
-  type ServiceOf, type SourceEvent, type Stream, type Uses,
+  type ServiceOf, type Source, type SourceEvent, type Stream, type Uses,
 } from './definitions.js';
 import { executeWorkflow, makeRun, type AnyWorkflow, type RunRecord, type Workflow } from './workflow.js';
 
-export interface Model<N extends string, A extends Record<string, AnyAggregate>, V extends Record<string, AnyView>, W extends Record<string, AnyWorkflow>, S extends Record<string, Stream<any, any>>, P extends readonly AnyConsumer[]> {
+export interface Model<N extends string, A extends Record<string, AggregateDefinition>, V extends Record<string, AnyView>, W extends Record<string, AnyWorkflow>, S extends Record<string, Stream<any, any>>, P extends readonly AnyConsumer[]> {
   readonly kind: 'model'; readonly name: N; readonly aggregates: A; readonly views: V;
   readonly workflows: W; readonly streams: S; readonly consumers: P;
 }
 export type AnyModel = Model<string, any, any, any, any, any>;
+function nameOf(definition: { readonly name: string; readonly kind: string } | AnyAggregateClass): string {
+  return 'aggregateName' in definition ? definition.aggregateName : definition.name;
+}
 export function model<
-  const N extends string, const A extends Record<string, AnyAggregate>, const V extends Record<string, AnyView> = {},
+  const N extends string, const A extends Record<string, AggregateDefinition>, const V extends Record<string, AnyView> = {},
   const W extends Record<string, AnyWorkflow> = {}, const S extends Record<string, Stream<any, any>> = {},
   const P extends readonly AnyConsumer[] = readonly [], const Q extends readonly AnyConsumer[] = readonly [],
 >(name: N, contract: { readonly aggregates: A; readonly views?: V; readonly workflows?: W; readonly streams?: S; readonly policies?: P; readonly projections?: Q }): Model<N, A, V, W, S, readonly [...P, ...Q]> {
   const views = contract.views ?? {};
   const consumers = [...(contract.policies ?? []), ...(contract.projections ?? [])];
-  const definitions = [...Object.values(contract.aggregates), ...Object.values(views), ...consumers, ...Object.values(contract.workflows ?? {}), ...Object.values(contract.streams ?? {})] as Array<{ name: string }>;
+  const definitions = [...Object.values(contract.aggregates), ...Object.values(views), ...consumers, ...Object.values(contract.workflows ?? {}), ...Object.values(contract.streams ?? {})] as Array<Source | AnyConsumer | AnyWorkflow | Stream<any, any>>;
   const names = new Set<string>();
   for (const definition of definitions) {
-    if (!definition.name || names.has(definition.name)) throw new TypeError(`Duplicate or empty definition: ${definition.name}`);
-    names.add(definition.name);
+    const name = nameOf(definition);
+    if (!name || names.has(name)) throw new TypeError(`Duplicate or empty definition: ${name}`);
+    names.add(name);
   }
   const aliases = [...Object.keys(contract.aggregates), ...Object.keys(views)];
   if (new Set(aliases).size !== aliases.length || aliases.some(alias => ['workflows', 'streams', 'flush', 'constructor', '__proto__', 'prototype', 'then'].includes(alias))) throw new TypeError('Duplicate or reserved model alias');
   const sources = new Set([...Object.values(contract.aggregates), ...Object.values(views)]);
   for (const definition of [...Object.values(views), ...consumers] as Array<AnyView | AnyConsumer>) {
     if (!sources.has(definition.from)) throw new TypeError(`Unregistered source for ${definition.name}`);
-    const events = definition.from.kind === 'aggregate' ? definition.from.events : definition.from.on;
-    for (const event of definition.on) if (!events.includes(event)) throw new TypeError(`Unknown source event: ${definition.name}.${event.name}`);
+    if (definition.from.kind !== 'class-aggregate') {
+      const events = definition.from.kind === 'aggregate' ? definition.from.events : definition.from.on;
+      for (const event of definition.on) if (!events.includes(event)) throw new TypeError(`Unknown source event: ${definition.name}.${event.name}`);
+    }
     if (!Number.isSafeInteger(definition.version) || definition.version < 1) throw new TypeError(`Invalid version: ${definition.name}`);
   }
   for (const consumer of consumers) if (!Number.isSafeInteger(consumer.batch) || consumer.batch < 1) throw new TypeError(`Invalid batch size: ${consumer.name}`);
@@ -41,15 +48,17 @@ export function model<
 export interface Receipt<R = unknown> {
   readonly commandId: string; readonly stream: string; readonly version: number;
   readonly events: readonly Envelope[]; readonly reply: R;
+  /** Event position for aggregates whose state version counts successful calls. */
+  readonly eventCursor?: number;
 }
 export type Conflict = { readonly _tag: 'Conflict'; readonly expected: number; readonly actual: number };
 export type CommandConflict = { readonly _tag: 'CommandConflict'; readonly commandId: string };
 export type ConsistencyTimeout = { readonly _tag: 'ConsistencyTimeout'; readonly stream: string; readonly version: number };
 export type RuntimeError = Unexpected | InvalidInput | Conflict | CommandConflict;
 export interface CallOptions extends ExecutionContext { readonly expectedVersion?: number }
-export interface ReadOptions { readonly atLeast?: Pick<Receipt, 'stream' | 'version'>; readonly signal?: AbortSignal }
+export interface ReadOptions { readonly atLeast?: Pick<Receipt, 'stream' | 'version' | 'eventCursor'>; readonly signal?: AbortSignal }
 export interface Snapshot<S> { readonly state: S; readonly cursor: number }
-interface Row { readonly state: unknown; readonly events: readonly Envelope[]; readonly receipts: Map<string, { input: unknown; receipt: Receipt }> }
+interface Row { readonly state: unknown; readonly version?: number; readonly events: readonly Envelope[]; readonly receipts: Map<string, { input: unknown; receipt: Receipt }> }
 interface ViewRow { state: unknown; events: Envelope[] }
 export interface MemoryStore {
   readonly kind: 'memory';
@@ -97,12 +106,24 @@ type UnionToIntersection<U> = [U] extends [never] ? {} : (U extends unknown ? (v
 type CommandUses<A> = A extends Aggregate<any, any, infer C> ? C[keyof C]['uses'] : never;
 type AllUses<M extends AnyModel> = CommandUses<M['aggregates'][keyof M['aggregates']]> | M['consumers'][number]['uses'] | M['workflows'][keyof M['workflows']]['uses'];
 export type ModelServices<M extends AnyModel> = UnionToIntersection<AllUses<M> extends infer U ? U extends Uses ? { [K in keyof U]: ServiceOf<U[K]> } : never : never>;
-type AggregateClient<A> = A extends Aggregate<any, infer S, infer C> ? {
-  [K in keyof C]: (id: string, input: InputOf<C[K]>, options?: CallOptions) => Promise<Result<Receipt<ReplyOf<C[K]>>, RejectionsOf<C[K]> | RuntimeError>>;
-} & {
+type ClassMethod<F> = F extends (...args: infer Args) => infer R
+  ? [Awaited<R>] extends [Result<unknown, Tagged>]
+    ? (id: string, ...args: Args) => Promise<Result<Receipt<ResultValue<Awaited<R>>>, ResultError<Awaited<R>> | InvalidInput | Unexpected>>
+    : never
+  : never;
+type ClassMethods<A extends AnyAggregateClass> = {
+  [K in Exclude<keyof InstanceType<A> & string, 'getState' | 'pullEvents'> as
+    ClassMethod<InstanceType<A>[K]> extends never ? never : K]: ClassMethod<InstanceType<A>[K]>;
+};
+type AggregateReads<S> = {
   get(id: string): Promise<Result<S, Unexpected>>;
   events(id: string, options?: { after?: number }): Promise<Result<readonly Envelope[], Unexpected>>;
-} : never;
+};
+type AggregateClient<A> = A extends AnyAggregateClass
+  ? ClassMethods<A> & AggregateReads<ReturnType<A['initial']>>
+  : A extends Aggregate<any, infer S, infer C> ? {
+    [K in keyof C]: (id: string, input: InputOf<C[K]>, options?: CallOptions) => Promise<Result<Receipt<ReplyOf<C[K]>>, RejectionsOf<C[K]> | RuntimeError>>;
+  } & AggregateReads<S> : never;
 type ViewState<V> = V extends AnyView ? ReturnType<V['initial']> : never;
 export interface ViewClient<S> {
   get(key: string, options?: ReadOptions): Promise<Result<S | null, Unexpected | ConsistencyTimeout>>;
@@ -135,7 +156,7 @@ export function wire<M extends AnyModel>(definition: M, ...options: keyof ModelS
   const services = (options[0]?.services ?? {}) as Record<string, unknown>;
   const prefix = JSON.stringify([definition.name]);
   const key = (...parts: unknown[]) => JSON.stringify([definition.name, ...parts]);
-  const definitions = [...Object.values(definition.aggregates), ...Object.values(definition.views), ...definition.consumers, ...Object.values(definition.workflows)] as Array<AnyAggregate | AnyView | AnyConsumer | AnyWorkflow>;
+  const definitions = [...Object.values(definition.aggregates), ...Object.values(definition.views), ...definition.consumers, ...Object.values(definition.workflows)] as Array<Source | AnyConsumer | AnyWorkflow>;
   const dependencyNames = new Map<string, Dependency<string, unknown>>();
   const serviceNames = new Map<string, Dependency<string, unknown>>();
   for (const item of definitions) {
@@ -155,8 +176,8 @@ export function wire<M extends AnyModel>(definition: M, ...options: keyof ModelS
     return { ...dependencies, ...metadata };
   };
   const consumerKey = (consumer: { name: string; version: number }) => key('consumer', consumer.name, consumer.version);
-  const sourceEvents = (source: AnyAggregate | AnyView): Envelope[] => {
-    if (source.kind === 'aggregate') return [...store.rows.entries()].filter(([id]) => id.startsWith(prefix.slice(0, -1) + ',') && JSON.parse(id)[1] === source.name).flatMap(([, row]) => [...row.events]);
+  const sourceEvents = (source: Source): Envelope[] => {
+    if (source.kind !== 'view') return [...store.rows.entries()].filter(([id]) => id.startsWith(prefix.slice(0, -1) + ',') && JSON.parse(id)[1] === nameOf(source)).flatMap(([, row]) => [...row.events]);
     return [...store.views.entries()].filter(([id]) => {
       const parts = JSON.parse(id);
       return parts[0] === definition.name && parts[1] === source.name && parts[2] === source.version;
@@ -174,7 +195,7 @@ export function wire<M extends AnyModel>(definition: M, ...options: keyof ModelS
     const baselineKey = `${consumerKey(view)}:baseline`;
     if (!store.cursors.has(baselineKey)) {
       const baseline = cursorFor(baselineKey);
-      for (const aggregate of Object.values(definition.aggregates) as AnyAggregate[]) {
+      for (const aggregate of Object.values(definition.aggregates) as AggregateDefinition[]) {
         for (const envelope of sourceEvents(aggregate)) baseline.set(envelope.stream, envelope.seq);
       }
     }
@@ -265,51 +286,89 @@ export function wire<M extends AnyModel>(definition: M, ...options: keyof ModelS
     return flushing;
   };
   output.flush = flush;
-  for (const [alias, aggregate] of Object.entries(definition.aggregates) as Array<[string, AnyAggregate]>) {
-    const client: Record<string, any> = {};
-    for (const [name, command] of Object.entries(aggregate.commands) as Array<[string, AnyCommand]>) {
-      client[name] = (id: string, input: unknown, callOptions: CallOptions = {}) => ordered(store, key(aggregate.name, id), async () => {
-        try {
-          if (typeof id !== 'string' || !id) return fail({ _tag: 'InvalidInput', message: 'An aggregate id must be a nonempty string' });
-          if (callOptions.signal?.aborted) throw callOptions.signal.reason;
-          const stream = key(aggregate.name, id);
-          if (callOptions.commandId !== undefined && (typeof callOptions.commandId !== 'string' || !callOptions.commandId)) return fail({ _tag: 'InvalidInput', message: 'commandId must be a nonempty string' });
-          if (callOptions.expectedVersion !== undefined && (!Number.isSafeInteger(callOptions.expectedVersion) || callOptions.expectedVersion < 0)) return fail({ _tag: 'InvalidInput', message: 'expectedVersion must be a nonnegative safe integer' });
-          const old = store.rows.get(stream);
-          const commandId = callOptions.commandId ?? crypto.randomUUID();
-          const signature = structuredClone({ name, input });
-          const previous = old?.receipts.get(commandId);
-          if (previous) return isDeepStrictEqual(previous.input, signature) ? ok(structuredClone(previous.receipt)) : fail({ _tag: 'CommandConflict', commandId });
-          const version = old?.events.length ?? 0;
-          if (callOptions.expectedVersion !== undefined && callOptions.expectedVersion !== version) return fail({ _tag: 'Conflict', expected: callOptions.expectedVersion, actual: version });
-          const at = Date.now();
-          const result = await command(old?.state ?? aggregate.initial(), input, context(command.uses, { ...callOptions, commandId, at }));
-          const [decisionValue, error] = result;
-          if (error !== null) return result;
-          if (callOptions.signal?.aborted) throw callOptions.signal.reason;
-          const decision = decisionValue as { events: Tagged[]; reply: unknown };
-          let state = structuredClone(old?.state ?? aggregate.initial());
-          const events: Envelope[] = [];
-          for (const event of decision.events) {
-            state = parse(aggregate.state, aggregate.evolve(structuredClone(state), structuredClone(event)));
-            const seq = version + events.length + 1;
-            events.push({ id: `${stream}:${seq}`, stream, seq, at, source: { type: aggregate.name, id }, event });
-          }
-          const receipt: Receipt = { commandId, stream, version: version + events.length, events, reply: decision.reply };
-          const receipts = new Map(old?.receipts);
-          receipts.set(commandId, { input: signature, receipt: structuredClone(receipt) });
-          // All validation and reduction finish before the synchronous in-memory commit.
-          store.rows.set(stream, { state: structuredClone(state), events: [...(old?.events ?? []), ...events], receipts });
-          notify(store, stream);
-          return ok(structuredClone(receipt));
-        } catch (cause) { return fail(unexpected(cause)); }
-      });
+  for (const [alias, aggregate] of Object.entries(definition.aggregates) as Array<[string, AggregateDefinition]>) {
+    const client: Record<string, any> = Object.create(null);
+    const aggregateName = nameOf(aggregate);
+    type Decision = { readonly events: readonly Tagged[]; readonly reply?: unknown; readonly state?: unknown };
+    const execute = (
+      id: string, name: string, input: unknown, callOptions: CallOptions,
+      decide: (state: unknown, metadata: ExecutionContext) => Promise<Result<Decision, Tagged>>,
+    ) => ordered(store, key(aggregateName, id), async () => {
+      try {
+        if (typeof id !== 'string' || !id) return fail({ _tag: 'InvalidInput', message: 'An aggregate id must be a nonempty string' });
+        if (callOptions.signal?.aborted) throw callOptions.signal.reason;
+        const stream = key(aggregateName, id);
+        if (callOptions.commandId !== undefined && (typeof callOptions.commandId !== 'string' || !callOptions.commandId)) return fail({ _tag: 'InvalidInput', message: 'commandId must be a nonempty string' });
+        if (callOptions.expectedVersion !== undefined && (!Number.isSafeInteger(callOptions.expectedVersion) || callOptions.expectedVersion < 0)) return fail({ _tag: 'InvalidInput', message: 'expectedVersion must be a nonnegative safe integer' });
+        const old = store.rows.get(stream);
+        const commandId = callOptions.commandId ?? crypto.randomUUID();
+        const signature = aggregate.kind === 'aggregate' ? structuredClone({ name, input }) : undefined;
+        const previous = aggregate.kind === 'aggregate' ? old?.receipts.get(commandId) : undefined;
+        if (previous) return isDeepStrictEqual(previous.input, signature) ? ok(structuredClone(previous.receipt)) : fail({ _tag: 'CommandConflict', commandId });
+        const cursor = old?.events.length ?? 0;
+        const version = old?.version ?? cursor;
+        if (callOptions.expectedVersion !== undefined && callOptions.expectedVersion !== version) return fail({ _tag: 'Conflict', expected: callOptions.expectedVersion, actual: version });
+        const at = Date.now();
+        const initial = old?.state ?? aggregate.initial();
+        const [decision, error] = await decide(initial, { ...callOptions, commandId, at });
+        if (error !== null) return fail(error);
+        if (callOptions.signal?.aborted) throw callOptions.signal.reason;
+        const state = aggregate.kind === 'class-aggregate' ? decision.state : decision.events.reduce(
+          (state, event) => parse(aggregate.state, aggregate.evolve(structuredClone(state), structuredClone(event))),
+          structuredClone(initial),
+        );
+        const events = decision.events.map((event, index): Envelope => {
+          const seq = cursor + index + 1;
+          return { id: `${stream}:${seq}`, stream, seq, at, source: { type: aggregateName, id }, event };
+        });
+        const receipt: Receipt = {
+          commandId, stream, events, reply: decision.reply,
+          ...(aggregate.kind === 'class-aggregate'
+            ? { version: version + 1, eventCursor: cursor + events.length }
+            : { version: cursor + events.length }),
+        };
+        const receipts = new Map(old?.receipts);
+        const copy = structuredClone(receipt);
+        if (aggregate.kind === 'aggregate') receipts.set(commandId, { input: signature, receipt: copy });
+        // Clone the result before committing so a failed clone leaves state and events untouched.
+        const response = structuredClone(copy);
+        store.rows.set(stream, { state: structuredClone(state), version: receipt.version, events: [...(old?.events ?? []), ...copy.events], receipts });
+        notify(store, stream);
+        return ok(response);
+      } catch (cause) { return fail(unexpected(cause)); }
+    });
+    if (aggregate.kind === 'class-aggregate') {
+      const schemas = new Map<string, AnyTaggedFactory>();
+      for (const consumer of [...Object.values(definition.views), ...definition.consumers] as Array<AnyView | AnyConsumer>) {
+        if (consumer.from !== aggregate) continue;
+        for (const factory of consumer.on) {
+          const previous = schemas.get(factory.name);
+          if (previous && previous !== factory) throw new TypeError(`Conflicting event definition: ${factory.name}`);
+          schemas.set(factory.name, factory);
+        }
+      }
+      for (const [name, method] of classMethods(aggregate)) {
+        client[name] = (id: string, ...args: unknown[]) => execute(id, name, args, {}, async state => {
+          const instance = new aggregate(structuredClone(state));
+          const result: unknown = await method.apply(instance, args);
+          tuple(result);
+          const [reply, error] = result;
+          if (error !== null) return fail(error);
+          const events = instance.pullEvents().map(event => schemas.get(event._tag)?.parse(event) ?? event);
+          return ok({ state: instance.getState(), events, reply });
+        });
+      }
+    } else {
+      for (const [name, command] of Object.entries(aggregate.commands) as Array<[string, AnyCommand]>) {
+        client[name] = (id: string, input: unknown, callOptions: CallOptions = {}) =>
+          execute(id, name, input, callOptions, async (state, metadata) => command(state, input, context(command.uses, metadata)));
+      }
     }
     client.get = async (id: string) => {
-      try { await store.locks.get(key(aggregate.name, id)); return ok(structuredClone(store.rows.get(key(aggregate.name, id))?.state ?? aggregate.initial())); }
+      try { await store.locks.get(key(aggregateName, id)); return ok(structuredClone(store.rows.get(key(aggregateName, id))?.state ?? aggregate.initial())); }
       catch (cause) { return fail(unexpected(cause)); }
     };
-    client.events = async (id: string, readOptions: { after?: number } = {}) => ok(structuredClone(store.rows.get(key(aggregate.name, id))?.events.filter(event => event.seq > (readOptions.after ?? 0)) ?? []));
+    client.events = async (id: string, readOptions: { after?: number } = {}) => ok(structuredClone(store.rows.get(key(aggregateName, id))?.events.filter(event => event.seq > (readOptions.after ?? 0)) ?? []));
     output[alias] = client;
   }
   for (const [alias, view] of Object.entries(definition.views) as Array<[string, AnyView]>) {
@@ -321,7 +380,7 @@ export function wire<M extends AnyModel>(definition: M, ...options: keyof ModelS
           if (readOptions.atLeast) {
             const outcome = await flush();
             const receipt = readOptions.atLeast;
-            if ((store.watermarks.get(consumerKey(view))?.get(receipt.stream) ?? 0) < receipt.version) {
+            if ((store.watermarks.get(consumerKey(view))?.get(receipt.stream) ?? 0) < (receipt.eventCursor ?? receipt.version)) {
               if (outcome[1] !== null) return fail(unexpected(outcome[1]));
               return fail({ _tag: 'ConsistencyTimeout', ...receipt });
             }
@@ -390,7 +449,7 @@ export function wire<M extends AnyModel>(definition: M, ...options: keyof ModelS
 export interface StoryContext<M extends AnyModel> {
   readonly bank: Runtime<M>;
   readonly equal: (actual: unknown, expected: unknown) => void;
-  readonly given: <A extends M['aggregates'][keyof M['aggregates']]>(aggregate: A, id: string, events: readonly SourceEvent<A>[]) => Promise<Result<void, Unexpected>>;
+  readonly given: <A extends Extract<M['aggregates'][keyof M['aggregates']], AnyAggregate>>(aggregate: A, id: string, events: readonly SourceEvent<A>[]) => Promise<Result<void, Unexpected>>;
 }
 export async function story<M extends AnyModel, R, E extends Tagged>(
   definition: M, body: (context: StoryContext<M>) => Promise<Result<R, E>> | Result<R, E>,
@@ -405,6 +464,7 @@ export async function story<M extends AnyModel, R, E extends Tagged>(
       async given(aggregate, id, events) {
         try {
           if (!Object.values(definition.aggregates).includes(aggregate)) throw new TypeError('Unregistered aggregate');
+          if (aggregate.kind !== 'aggregate') throw new TypeError('Class aggregates are restored from state');
           const stream = JSON.stringify([definition.name, aggregate.name, id]);
           if (storage.rows.has(stream)) throw new TypeError('History already exists for this instance');
           let state = aggregate.initial();

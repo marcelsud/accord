@@ -1,100 +1,23 @@
-import {
-  aggregate,
-  command,
-  event,
-  fail,
-  wire,
-  integer,
-  match,
-  model,
-  ok,
-  refine,
-  rejection,
-  s,
-  view,
-} from "@marcelsud/accord";
-
-export const Cents = refine(integer, (value) => value > 0, "positive cents");
-export const State = s.object({ open: s.boolean, balance: integer });
-export const Balance = { balance: integer };
-export const Opened = event("Opened");
-export const Deposited = event("Deposited", { amount: Cents });
-export const AlreadyOpen = rejection("AlreadyOpen");
-export const NotOpen = rejection("NotOpen");
-
-export const AccountContract = {
-  state: State,
-  commands: {
-    open: {
-      input: {},
-      events: [Opened],
-      rejects: [AlreadyOpen],
-    },
-    deposit: {
-      input: { amount: Cents },
-      events: [Deposited],
-      rejects: [NotOpen],
-      reply: Balance,
-    },
-  },
-};
-export const open = command(AccountContract, "open", (state) => {
-  if (state.open) return fail(AlreadyOpen());
-  return ok({ events: [Opened()] });
-});
-export const deposit = command(
-  AccountContract,
-  "deposit",
-  (state, { amount }) => {
-    if (!state.open) return fail(NotOpen());
-    return ok({
-      events: [Deposited({ amount })],
-      reply: { balance: state.balance + amount },
-    });
-  },
-);
-export const Account = aggregate(
-  "Account",
-  {
-    state: AccountContract.state,
-    initial: () => ({ open: false, balance: 0 }),
-    commands: { open, deposit },
-  },
-  (state, event) =>
-    match(event, {
-      Opened: () => ({ ...state, open: true }),
-      Deposited: ({ amount }) => ({
-        ...state,
-        balance: state.balance + amount,
-      }),
-    }),
-);
-export const Summary = view(
-  "Summary",
-  {
-    from: Account,
-    on: [Deposited],
-    state: Balance,
-    initial: () => ({ balance: 0 }),
-  },
-  (state, event) => ({ balance: state.balance + event.amount }),
-);
-export const Bank = model("Bank", {
-  aggregates: { account: Account },
-  views: { summary: Summary },
-});
+import { wire } from "@marcelsud/accord";
+import { Account, Bank } from "./domain.js";
 
 const bank = wire(Bank);
-const [, openError] = await bank.account.open("a-1", {});
+const id = "a-1";
+const [, openError] = await bank.account.open(id);
 if (openError !== null) throw openError;
-const [receipt, error] = await bank.account.deposit(
-  "a-1",
-  { amount: 100 },
-  { commandId: "first-deposit" },
-);
+const [receipt, error] = await bank.account.deposit(id, 100);
 if (error !== null) throw error;
-const [summary, readError] = await bank.summary.get("a-1", {
+const [summary, readError] = await bank.summary.get(id, {
   atLeast: receipt,
 });
 if (readError !== null) throw readError;
-console.log(summary); // { balance: 100 }
+console.log("Balance view:", summary); // { balance: 100 }
+
+const [state, stateError] = await bank.account.get(id);
+if (stateError !== null) throw stateError;
+
+const preview = Account.restore(state);
+const [reply, previewError] = preview.deposit(50);
+if (previewError !== null) throw previewError;
+console.log("Standalone preview:", reply); // { balance: 150 }
+console.log("Pending events:", preview.pullEvents());

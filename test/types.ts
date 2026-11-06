@@ -1,7 +1,7 @@
 import { Effect } from 'effect';
 import { effectify } from '../src/effect.js';
 import {
-  command, event, external, fail, wire, integer, match, model, ok, rejection, service, string,
+  aggregate, command, event, external, fail, wire, integer, match, model, ok, rejection, service, string,
   type Infer, type ReplyOf, type Requirement, type Result,
 } from '../src/index.js';
 import { Account, AlreadyOpen, Balance, Bank, Cents, Deposited, InsufficientFunds, NotOpen, Opened, State, deposit } from './fixtures.js';
@@ -243,3 +243,46 @@ command({ state: State, input: {}, events: [noEvents] },
   // @ts-expect-error Event outputs must be among the declared events.
   () => ok({ events: [Deposited({ amount: 1 })] }),
 );
+
+class ClassAccount extends aggregate('ClassAccount', { open: false, balance: 0 }) {
+  open() {
+    this.state.open = true;
+    return ok(undefined);
+  }
+
+  async deposit(amount: number, note?: string) {
+    if (!this.state.open) return fail(NotOpen());
+    this.state.balance += amount;
+    return ok({ balance: this.state.balance, note });
+  }
+
+  balance() {
+    return this.state.balance;
+  }
+}
+const classBank = wire(model('ClassBank', { aggregates: { account: ClassAccount } }));
+const classAccount = ClassAccount.restore({ open: true, balance: 100 });
+type ClassState = Expect<Equal<ReturnType<typeof classAccount.getState>, { open: boolean; balance: number }>>;
+const freshClassAccount = ClassAccount.create();
+type ClassCreate = Expect<Equal<typeof freshClassAccount, ClassAccount>>;
+// @ts-expect-error Restoring uses the inferred initial state shape.
+ClassAccount.restore({ open: true, balance: '100' });
+// @ts-expect-error Base helpers are not runtime commands.
+classBank.account.getState('a');
+// @ts-expect-error Ordinary return values do not define managed methods.
+classBank.account.balance('a');
+// @ts-expect-error A runtime call prepends the aggregate ID.
+classBank.account.deposit(100);
+// @ts-expect-error Method parameters are inferred from the class.
+classBank.account.deposit('a', '100');
+classBank.account.deposit('a', 100);
+async function classInference() {
+  const [receipt, error] = await classBank.account.deposit('a', 100, 'test');
+  // @ts-expect-error Check the error before using the receipt.
+  receipt.reply;
+  if (error === null) {
+    type ClassReply = Expect<Equal<typeof receipt.reply, { balance: number; note: string | undefined }>>;
+  } else {
+    type ClassRejections = Expect<Equal<typeof error._tag, 'NotOpen' | 'InvalidInput' | 'Unexpected'>>;
+  }
+}

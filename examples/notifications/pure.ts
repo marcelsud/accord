@@ -1,50 +1,14 @@
+import { wire, memory, model, policy, projection } from "@marcelsud/accord";
 import {
-  aggregate,
-  command,
-  fail,
-  wire,
-  match,
-  memory,
-  model,
-  ok,
-  policy,
-  projection,
-} from "@marcelsud/accord";
-import {
-  AlreadyOpen,
+  Account,
   Deposited,
   LedgerStore,
-  NotOpen,
   Notifications,
-  Opened,
-  AccountContract,
   ledgerRows,
   type LedgerPort,
   type NotificationPort,
 } from "./domain.js";
 
-const open = command(AccountContract, "open", (state) => {
-  if (state.open) return fail(AlreadyOpen());
-  return ok({ events: [Opened()] });
-});
-const deposit = command(AccountContract, "deposit", (state, { amount }) => {
-  if (!state.open) return fail(NotOpen());
-  const balance = state.balance + amount;
-  return ok({ events: [Deposited({ amount, balance })], reply: { balance } });
-});
-const Account = aggregate(
-  "Account",
-  {
-    state: AccountContract.state,
-    initial: () => ({ open: false, balance: 0 }),
-    commands: { open, deposit },
-  },
-  (state, event) =>
-    match(event, {
-      Opened: () => ({ ...state, open: true }),
-      Deposited: ({ balance }) => ({ ...state, balance }),
-    }),
-);
 const LedgerProjection = projection(
   "Ledger",
   {

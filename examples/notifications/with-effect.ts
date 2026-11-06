@@ -1,62 +1,16 @@
 import { Effect } from "effect";
 import { effectify } from "@marcelsud/accord/effect";
+import { wire, memory, model, policy, projection } from "@marcelsud/accord";
 import {
-  aggregate,
-  command,
-  wire,
-  match,
-  memory,
-  model,
-  policy,
-  projection,
-} from "@marcelsud/accord";
-import {
-  AlreadyOpen,
+  Account,
   Deposited,
   LedgerStore,
-  NotOpen,
   Notifications,
-  Opened,
-  AccountContract,
   ledgerRows,
   type LedgerPort,
   type NotificationPort,
 } from "./domain.js";
 
-const open = command(
-  AccountContract,
-  "open",
-  effectify((state) =>
-    Effect.gen(function* () {
-      if (state.open) return yield* Effect.fail(AlreadyOpen());
-      return { events: [Opened()] };
-    }),
-  ),
-);
-const deposit = command(
-  AccountContract,
-  "deposit",
-  effectify((state, { amount }) =>
-    Effect.gen(function* () {
-      if (!state.open) return yield* Effect.fail(NotOpen());
-      const balance = state.balance + amount;
-      return { events: [Deposited({ amount, balance })], reply: { balance } };
-    }),
-  ),
-);
-const Account = aggregate(
-  "Account",
-  {
-    state: AccountContract.state,
-    initial: () => ({ open: false, balance: 0 }),
-    commands: { open, deposit },
-  },
-  (state, event) =>
-    match(event, {
-      Opened: () => ({ ...state, open: true }),
-      Deposited: ({ balance }) => ({ ...state, balance }),
-    }),
-);
 const LedgerProjection = projection(
   "Ledger",
   {

@@ -1,5 +1,5 @@
 import { fail, ok, unexpected, type Result, type Tagged, type Unexpected } from './result.js';
-import { bindBody, tuple, checkError, checkUses, validateUses, type AnyCommand, type AnyTaggedFactory, type AnyRejection, type Values, type AnyView, type Body, type ContextOf, type Uses } from './definitions.js';
+import { bindBody, tuple, checkError, checkUses, validateUses, type AggregateDefinition, type AnyAggregate, type AnyCommand, type AnyTaggedFactory, type AnyRejection, type Values, type AnyView, type Body, type ContextOf, type Uses } from './definitions.js';
 import { type AnyModel, type Runtime } from './runtime.js';
 
 export interface ApiRequest {
@@ -19,7 +19,8 @@ export function api<
 >(name: N, contract: { readonly model: M; readonly commands: C; readonly views: V; readonly uses?: U; readonly rejects?: Re },
   authorize?: Body<[ApiRequest], U, { readonly actor?: unknown }, Values<Re>>,
 ): Api<N, M, C, V, U, Values<Re>> {
-  const knownCommands = Object.values(contract.model.aggregates).flatMap((aggregate: any) => Object.values(aggregate.commands));
+  const knownCommands = (Object.values(contract.model.aggregates) as AggregateDefinition[])
+    .flatMap(aggregate => aggregate.kind === 'aggregate' ? Object.values(aggregate.commands) : []);
   for (const command of contract.commands) if (!knownCommands.includes(command)) throw new TypeError('API contains an unregistered command');
   for (const view of contract.views) if (!Object.values(contract.model.views).includes(view)) throw new TypeError('API contains an unregistered view');
   const uses = (contract.uses ?? {}) as U;
@@ -40,11 +41,12 @@ export function api<
   } as Api<N, M, C, V, U, Values<Re>>;
 }
 type WithErrors<F, E extends Tagged> = F extends (...args: infer A) => Promise<Result<infer R, infer Existing>> ? (...args: A) => Promise<Result<R, Existing | E>> : never;
+type ApiCommands<A> = A extends AnyAggregate ? A['commands'] : {};
 export type ApiClient<A extends AnyApi> = {
   [K in keyof A['model']['aggregates'] as keyof {
-    [C in keyof A['model']['aggregates'][K]['commands'] as A['model']['aggregates'][K]['commands'][C] extends A['commands'][number] ? C : never]: unknown
+    [C in keyof ApiCommands<A['model']['aggregates'][K]> as ApiCommands<A['model']['aggregates'][K]>[C] extends A['commands'][number] ? C : never]: unknown
   } extends never ? never : K]: {
-    [C in keyof A['model']['aggregates'][K]['commands'] as A['model']['aggregates'][K]['commands'][C] extends A['commands'][number] ? C : never]:
+    [C in keyof ApiCommands<A['model']['aggregates'][K]> as ApiCommands<A['model']['aggregates'][K]>[C] extends A['commands'][number] ? C : never]:
       WithErrors<Runtime<A['model']>[K & keyof Runtime<A['model']>][C & keyof Runtime<A['model']>[K & keyof Runtime<A['model']>]], A extends Api<any, any, any, any, any, infer E> ? E | NotFound | Unauthorized : never>;
   }
 } & {
@@ -72,7 +74,7 @@ export function serve<A extends AnyApi>(definition: A, options: { readonly runti
       let callable: ((...args: any[]) => Promise<Result<unknown, Tagged>>) | undefined;
       if (body.kind === 'command') {
         const aggregate = Object.hasOwn(definition.model.aggregates, alias) ? definition.model.aggregates[alias] : undefined;
-        const command = aggregate && Object.hasOwn(aggregate.commands, method) ? aggregate.commands[method] : undefined;
+        const command = aggregate?.kind === 'aggregate' && Object.hasOwn(aggregate.commands, method) ? aggregate.commands[method] : undefined;
         if (command && definition.commands.includes(command)) callable = (options.runtime as any)[alias][method];
       } else {
         const view = Object.hasOwn(definition.model.views, alias) ? definition.model.views[alias] : undefined;

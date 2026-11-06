@@ -27,21 +27,20 @@ const { bank } = createBank(
   createNotifications(notificationSystem.url),
 );
 
-const [, openError] = await bank.account.open("a-1", {});
+const accountId = "a-1";
+const [, openError] = await bank.account.open(accountId);
 if (openError !== null) throw openError;
-const [receipt, error] = await bank.account.deposit(
-  "a-1",
-  { amount: 100 },
-  { commandId: "first-deposit" },
-);
+const [receipt, error] = await bank.account.deposit(accountId, 100);
 if (error !== null) throw error;
-const [, deliveryError] = await bank.flush();
-if (deliveryError !== null) throw deliveryError;
-const [rows, queryError] = ledger.list("a-1");
-if (queryError !== null) throw queryError;
 
 console.log(`Mode: ${mode}`);
 console.log(`SQLite: ${filename}`);
 console.log(`Committed balance: ${receipt.reply.balance}`);
+
+const [, deliveryError] = await bank.flush();
+if (deliveryError !== null) throw deliveryError;
+const [rows, queryError] = ledger.list(accountId);
+if (queryError !== null) throw queryError;
+
 console.table(rows);
 console.log(`Notifications sent: ${notificationSystem.received.size}`);

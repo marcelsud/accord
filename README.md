@@ -14,20 +14,21 @@ this repository yet.
 
 ## Run the examples
 
-Use Node.js 24 or newer:
+Use Node.js 24 or newer. The checks compile the examples and exercise the
+notification adapter against a local loopback server.
 
 ```sh
 git clone https://github.com/marcelsud/accord.git
 cd accord
-npm install
+npm ci --ignore-scripts
 npm run check
 npm run example
 npm run example:effect
 ```
 
-The bank example prints `{ balance: 100 }`. The Effect example also runs that
-bank example, then prints `100`. [The complete bank](examples/bank/pure.ts) and
-[Effect example](examples/bank/with-effect.ts) are compiled with the tests.
+The native bank example prints a stored balance of 100 and a standalone preview
+of 150. The Effect example prints 100. Both use the same account class.
+[Bank walkthrough](examples/bank/README.md)
 
 For a complete integration example, run both versions with a SQLite ledger and
 an external notification system after `npm run check`:
@@ -38,9 +39,9 @@ npm run example:sqlite:effect
 ```
 
 They project account events into SQLite and send notifications through an
-external-system contract. [The walkthrough](examples/notifications/README.md) explains
-replay, idempotency keys, and failed-request retries. SQLite stores the derived
-ledger; aggregate state and delivery checkpoints remain in memory.
+external system contract. SQLite stores the derived ledger. Aggregate state and
+delivery checkpoints live in memory.
+[Notification walkthrough](examples/notifications/README.md)
 
 To consume a local build, run `npm pack` and install the generated
 `marcelsud-accord-0.1.0.tgz` in another project. Import the core from
@@ -49,47 +50,40 @@ To consume a local build, run `npm pack` and install the generated
 
 ## Define business rules
 
-The following excerpt uses the schemas and constructors defined in
-[the bank example](examples/bank/pure.ts):
+The bank example defines an account as a class. Its initial state supplies the
+type of `this.state`, and its methods supply the types for runtime calls.
 
 ```ts
-import { command, fail, ok } from "@marcelsud/accord";
+import { aggregate, event, integer, model, ok, refine, wire } from "@marcelsud/accord";
 
-const AccountContract = {
-  state: State,
-  commands: {
-    deposit: {
-      input: { amount: Cents },
-      events: [Deposited],
-      rejects: [NotOpen],
-      reply: Balance,
-    },
-  },
-};
+const Cents = refine(integer, (amount) => amount > 0, "positive cents");
+const Deposited = event("Deposited", { amount: Cents, balance: integer });
 
-const deposit = command(AccountContract, "deposit", (state, { amount }) => {
-  if (!state.open) return fail(NotOpen());
+class Account extends aggregate("Account", { balance: 0 }) {
+  deposit(amount: number) {
+    const event = Deposited({ amount, balance: this.state.balance + amount });
 
-  return ok({
-    events: [Deposited({ amount })],
-    reply: { balance: state.balance + amount },
-  });
-});
+    this.state.balance = event.balance;
+    this.emit(event);
+
+    return ok({ balance: this.state.balance });
+  }
+}
+
+const Bank = model("Bank", { aggregates: { account: Account } });
+const bank = wire(Bank);
+const [receipt, error] = await bank.account.deposit("account-123", 100);
+if (error !== null) throw error;
+console.log(receipt.reply); // { balance: 100 }
 ```
 
-Declare state once on the aggregate contract. `command(AccountContract,
-"deposit", body)` infers state, input, events, rejections, reply, and dependencies
-from the named declaration. Plain objects work without `as const` or explicit
-generics. The body is `decide`: it describes events and a reply. The aggregate's
-reducer is `evolve`: it applies those events. Keep decisions and reducers
-deterministic; external actions belong in policies or workflows. The reply is
-supplied by the command body and checked against its schema; Accord does not
-compute it from the resulting state.
-
-The runtime validates the input, decision, reply, and resulting state before
-committing. Commands for one instance run in order. Commands for different
-instances can run independently. A successful commit stores events, state, and
-the command receipt together in memory.
+Use `Account.create()` for a fresh instance or `Account.restore(state)` to
+start with known state. `getState()` returns a copy, and `pullEvents()` drains
+the instance's pending events. Direct calls mutate that local instance. For stored
+state, call methods through `wire()` with the instance ID first. It runs the method
+on an isolated instance and commits state and events together on `ok()`. A
+`fail()` result or exception discards the working instance.
+[Class aggregate reference](docs/runtime.md#class-aggregates)
 
 ## Use tagged rejections
 
@@ -122,25 +116,21 @@ Custom synchronous schemas implement `{ parse(value: unknown): T }`.
 ## Check tuples before using values
 
 ```ts
-const [receipt, error] = await bank.account.deposit(
-  "a-1",
-  { amount: 100 },
-  { commandId: "deposit-123" },
-);
+const [receipt, error] = await bank.account.deposit("a-1", 100);
 
 // receipt is unknown until error is narrowed.
 if (error !== null) {
-  if (error._tag === "NotOpen") console.log("Open the account first");
-  return;
+  console.error(error._tag);
+} else {
+  console.log(receipt.reply.balance);
 }
-
-console.log(receipt.reply.balance);
 ```
 
 Always inspect the error slot: a successful operation can return `null` or
 `undefined`. `Unexpected` is an `Error` carrying `_tag: "Unexpected"` and the
-original thrown value in `cause`. Invalid boundary inputs return `InvalidInput`;
-invalid handler outputs become `Unexpected`.
+original thrown value in `cause`. Input validation at a schema boundary
+returns `InvalidInput`. A thrown exception or an invalid runtime result becomes
+`Unexpected`.
 
 `trycatch(task)` provides the same convention for synchronous functions, async
 functions, and promises. Prefer a function when invocation must be deferred.
@@ -184,72 +174,32 @@ from the runtime; HTTP callers cannot provide an actor or dependency bindings.
 
 ## Add optional Effect integration
 
-Install Effect separately. The core entry point never imports it.
+Install Effect separately. The core entry point never imports it. A class method
+runs through the native runtime and can be called inside `Effect.gen`:
 
 ```ts
 import { Effect } from "effect";
-import { effectify } from "@marcelsud/accord/effect";
 
-const LimitedAccountContract = {
-  state: AccountContract.state,
-  commands: {
-    deposit: {
-      ...AccountContract.commands.deposit,
-      uses: { rules: DepositRules },
-    },
-  },
-};
-
-const limitedDeposit = command(
-  LimitedAccountContract,
-  "deposit",
-  effectify((state, { amount }) => Effect.gen(function* () {
-    const rules = yield* effectify(DepositRules);
-    if (!state.open || amount > rules.maximum) {
-      return yield* Effect.fail(NotOpen());
-    }
-
-    return {
-      events: [Deposited({ amount })],
-      reply: { balance: state.balance + amount },
-    };
-  })),
-);
-```
-
-`uses` defines the allowed service requirements. Yielding a service key adds its
-requirement to the Effect; undeclared requirements fail type checking. Use
-`Effect.fail` and plain return values inside an Effect-backed body. Native
-callers still receive tuples. Finalizers finish before the tuple is returned;
-an interrupted command does not commit.
-
-`effectify(Dependency)` returns a stable Effect service key.
-`effectify(Command)` lifts a standalone command into a lazy Effect-returning
-function. This evaluates a **decision** without committing aggregate changes:
-
-```ts
 const program = Effect.gen(function* () {
-  const decision = yield* effectify(limitedDeposit)(
-    { open: true, balance: 0 },
-    { amount: 100 },
+  const [receipt, error] = yield* Effect.promise(() =>
+    bank.account.deposit("a-1", 100),
   );
-  return decision.reply.balance;
+  if (error !== null) return yield* Effect.fail(error);
+  return receipt.reply.balance;
 });
-
-await Effect.runPromise(
-  Effect.provideService(program, effectify(DepositRules), { maximum: 1_000 }),
-);
 ```
 
-Dependency keys preserve their native service shape, including tuple-returning
-functions. The runtime executes Effect-backed bodies in their own Effect
-execution with declared services and an abort signal. Ambient FiberRefs and
-tracing context are not automatically bridged from an outer Effect execution.
+Use `effectify(Dependency)` to get a stable Effect service key. Use
+`effectify(body)` for policies, projections, workflows, external adapters, and
+commands defined with `command()`. Their `uses` declaration checks the Effect
+requirements. See the [Effect bank example](examples/bank/with-effect.ts) and the
+[Effect notification example](examples/notifications/with-effect.ts).
 
 ## Build the rest of the model
 
 | Primitive | Handler and behavior |
 | --- | --- |
+| `aggregate(name, initialState)` | Class base with inferred state, factories, and event collection |
 | `aggregate(name, contract, evolve)` | `(state, event) => state`; infers events from commands |
 | `view(name, contract, evolve)` | `(state, event, envelope) => state`; replays history, supports routing and versions |
 | `policy(name, contract, body)` | `(envelope, ctx) => Result`; handles new events only |
@@ -286,9 +236,10 @@ Without `atLeast`, reads return the currently materialized state, which may be
 `null`. Native watchers return async generators of snapshot tuples. Supply an
 `AbortSignal` to stop a pending watcher.
 
-Command IDs deduplicate successful commits per instance. Reusing an ID with a
-different command or input returns `CommandConflict`. `expectedVersion` enables
-optimistic version checks and returns `Conflict` when it differs.
+Contract-based commands accept `commandId` and `expectedVersion` call options.
+The ID deduplicates successful commits per instance. Reusing it with a different
+command or input returns `CommandConflict`. A stale version returns `Conflict`.
+Class methods accept the arguments declared by the method after the instance ID.
 
 [Read the runtime and transport reference](docs/runtime.md) for workflows,
 external adapters, HTTP authorization, testing, and the limits of this release.

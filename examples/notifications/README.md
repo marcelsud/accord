@@ -2,7 +2,7 @@
 
 This example opens an account, deposits money, records a ledger entry, and asks
 an external notification system to notify the account holder. Both versions use
-the same domain contracts and dependencies:
+the same account class and external system contracts.
 
 - [`pure.ts`](pure.ts) uses native tuples.
 - [`with-effect.ts`](with-effect.ts) uses `effectify`, `Effect.gen`, and `yield*`.
@@ -39,13 +39,24 @@ because aggregate state and event sequence numbers start fresh in memory.
 
 ## Follow the domain
 
-`domain.ts` declares `AccountContract` with one state schema and named command
-contracts. Both implementations use `command(AccountContract, "deposit", body)`
-and create the runtime with `wire(Bank, { storage, services })`. The native body
-returns tuples; the Effect body uses `effectify` and `Effect.gen`.
+Both implementations register the `Account` class in `model()` and provide
+the ledger and notification services through `wire()`. The Effect version
+uses `effectify` and `Effect.gen` for its consumers.
 
-1. A command decides an `Opened` or `Deposited` event and commits it through the
-   Accord runtime.
+```ts
+const [, openError] = await bank.account.open("a-1");
+if (openError !== null) throw openError;
+
+const [receipt, error] = await bank.account.deposit("a-1", 100);
+if (error !== null) throw error;
+console.log(receipt.reply.balance); // 100
+
+const [, deliveryError] = await bank.flush();
+if (deliveryError !== null) throw deliveryError;
+```
+
+1. An account method updates state and emits `Opened` or `Deposited`. Accord
+   saves the state and events together on success.
 2. `bank.flush()` delivers events to the ledger projection and notification
    policy.
 3. The projection calls `LedgerStore.record`. Stable event IDs allow the store to
@@ -98,23 +109,23 @@ upserts the same event IDs. A failed statement rolls back the entire batch.
 
 ## Read the files
 
-| File                                                                   | Responsibility                                               |
-| ---------------------------------------------------------------------- | ------------------------------------------------------------ |
-| [`domain.ts`](domain.ts)                                               | Domain contracts, rejections, and external-system interfaces |
-| [`pure.ts`](pure.ts)                                                   | Native commands, projection, policy, and model composition   |
-| [`with-effect.ts`](with-effect.ts)                                     | Equivalent Effect-backed domain behavior                     |
-| [`adapters/notifications.ts`](adapters/notifications.ts)               | Native notification adapter                                  |
-| [`adapters/notifications-effect.ts`](adapters/notifications-effect.ts) | Effect notification adapter                                  |
-| [`adapters/dummy-notifications.ts`](adapters/dummy-notifications.ts)   | Dummy notification system                                    |
-| [`adapters/sqlite.ts`](adapters/sqlite.ts)                             | SQLite ledger implementation                                 |
-| [`run.ts`](run.ts)                                                     | Binds the adapters, wires the model, and runs the example    |
+| File                                                                   | Responsibility                                            |
+| ---------------------------------------------------------------------- | --------------------------------------------------------- |
+| [`domain.ts`](domain.ts)                                               | Account class, rejections, and external system contracts  |
+| [`pure.ts`](pure.ts)                                                   | Native projection, policy, and model composition          |
+| [`with-effect.ts`](with-effect.ts)                                     | Effect projection, policy, and model composition          |
+| [`adapters/notifications.ts`](adapters/notifications.ts)               | Native notification adapter                               |
+| [`adapters/notifications-effect.ts`](adapters/notifications-effect.ts) | Effect notification adapter                               |
+| [`adapters/dummy-notifications.ts`](adapters/dummy-notifications.ts)   | Dummy notification system                                 |
+| [`adapters/sqlite.ts`](adapters/sqlite.ts)                             | SQLite ledger implementation                              |
+| [`run.ts`](run.ts)                                                     | Binds the adapters, wires the model, and runs the example |
 
 ## Verify failure and replay behavior
 
 [`test/notifications.test.ts`](../../test/notifications.test.ts) runs both domain
-implementations with fake notifications and with real adapters. It verifies
-persistence after reopening SQLite, projection replay, command deduplication,
-failed-response retries, conflicting requests, cancellation, and SQL rollback.
+versions with fake notifications and real adapters. It verifies persistence
+after reopening SQLite, idempotent projection writes, notification retry and
+deduplication, conflicting requests, cancellation, and SQL rollback.
 
 Enable the dummy system's failed-response mode with
 `startDummyNotifications({ failFirstAfterAccept: true })`.
