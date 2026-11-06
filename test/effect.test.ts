@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { Cause, Effect, Exit } from 'effect';
+import { Cause, Effect, Exit, Layer } from 'effect';
 import { effectify } from '../src/effect.js';
-import { aggregate, command, external, wire, integer, match, model, ok, policy, service, string } from '../src/index.js';
+import { aggregate, command, external, fail, wire, integer, match, model, ok, policy, service, string, view } from '../src/index.js';
 import { Account, Balance, Cents, Deposited, NotOpen, Opened, State, open } from './fixtures.js';
 import { failure, success } from './helpers.js';
 
@@ -126,4 +126,53 @@ test('Effect-backed policies receive uses as their environment', async () => {
   success(await bank.account.deposit('a', { amount: 100 }));
   success(await bank.flush());
   assert.deepEqual(seen, [50]);
+});
+
+test('effectified models resolve layers and run factory methods lazily through yield*', async () => {
+  let calls = 0;
+  const Audit = service('DepositAudit', { multiplier: integer });
+  const audited: number[] = [];
+  const Account = aggregate('FactoryAccount', { balance: 0 }, ({ state, emit, rules }) => ({
+    deposit(amount: number) {
+      calls++;
+      state.balance += amount;
+      emit(Deposited({ amount }));
+      return amount > rules.maximum ? fail(NotOpen()) : ok({ balance: state.balance });
+    },
+  }), { uses: { rules: Rules } });
+  const Summary = view('FactorySummary', { from: Account, on: [Deposited], state: Balance, initial: () => ({ balance: 0 }) },
+    (state, event) => ({ balance: state.balance + event.amount }),
+  );
+  const audit = policy('AuditDeposit', { from: Account, on: [Deposited], uses: { audit: Audit } },
+    ({ event }, { audit }) => {
+      audited.push(event.amount * audit.multiplier);
+      return ok(undefined);
+    },
+  );
+  const Bank = model('FactoryBank', { aggregates: { account: Account }, views: { summary: Summary }, policies: [audit] });
+
+  const program = Effect.gen(function* () {
+    const bank = yield* effectify(Bank);
+    const deposit = bank.account.deposit('a', 50);
+    assert.equal(calls, 0);
+    assert.deepEqual(yield* bank.account.get('a'), { balance: 0 });
+
+    const receipt = yield* deposit;
+    assert.equal(calls, 1);
+    assert.deepEqual(receipt.reply, { balance: 50 });
+    assert.deepEqual(yield* bank.summary.get('a', { atLeast: receipt }), { balance: 50 });
+
+    const rejected = yield* Effect.exit(bank.account.deposit('a', 101));
+    assert.ok(Exit.isFailure(rejected));
+    assert.deepEqual(Cause.squash(rejected.cause), NotOpen());
+    assert.deepEqual(yield* bank.account.get('a'), { balance: 50 });
+    assert.deepEqual(yield* bank.account.events('a'), receipt.events);
+  });
+
+  const dependencies = Layer.merge(
+    Layer.succeed(RulesKey, { maximum: 100 }),
+    Layer.succeed(effectify(Audit), { multiplier: 2 }),
+  );
+  await Effect.runPromise(Effect.provide(program, dependencies));
+  assert.deepEqual(audited, [100]);
 });

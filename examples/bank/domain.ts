@@ -9,6 +9,7 @@ import {
   parse,
   refine,
   rejection,
+  service,
   union,
   view,
   vo,
@@ -31,6 +32,8 @@ const Status = {
 
 const Cents = refine(integer, (amount) => amount > 0, "positive cents");
 
+export const DepositRules = service("DepositRules", { maximum: Cents });
+
 class Balance extends vo("Balance", integer) {
   get cents() {
     return this.value;
@@ -45,11 +48,12 @@ const Opened = event("Opened");
 const Deposited = event("Deposited", { amount: Cents, balance: integer });
 const CannotOpen = rejection("CannotOpen", { status: StatusSchema });
 const NotOpen = rejection("NotOpen");
+const DepositLimit = rejection("DepositLimit", { maximum: Cents });
 
 export const Account = aggregate(
   "Account",
   { status: Status.of("PENDING"), balance: 0 },
-  ({ state, emit }) => ({
+  ({ state, emit, rules }) => ({
     open() {
       if (state.status !== "PENDING") {
         return fail(CannotOpen({ status: state.status }));
@@ -62,6 +66,9 @@ export const Account = aggregate(
 
     deposit(amount: number) {
       if (state.status !== "OPEN") return fail(NotOpen());
+      if (amount > rules.maximum) {
+        return fail(DepositLimit({ maximum: rules.maximum }));
+      }
 
       const balance = Balance.of(state.balance).inc(amount).cents;
       state.balance = balance;
@@ -70,6 +77,7 @@ export const Account = aggregate(
       return ok({ balance });
     },
   }),
+  { uses: { rules: DepositRules } },
 );
 
 export const SavingsAccount = aggregate(

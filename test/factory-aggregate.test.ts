@@ -5,20 +5,21 @@ import { Account, Bank } from '../examples/bank/domain.js';
 import { failure, success } from './helpers.js';
 
 test('factory aggregates share one state shape across stored and standalone calls', async () => {
-  assert.deepEqual(Account.create().getState(), { status: 'PENDING', balance: 0 });
+  const services = { rules: { maximum: 1_000 } };
+  assert.deepEqual(Account.create(undefined, services).getState(), { status: 'PENDING', balance: 0 });
   const storage = memory();
-  const bank = wire(Bank, { storage });
+  const bank = wire(Bank, { storage, services });
   assert.equal(failure(await bank.account.deposit('a', 10))._tag, 'NotOpen');
   success(await bank.account.open('a'));
   success(await bank.account.deposit('a', 100));
   assert.deepEqual(success(await bank.account.get('a')), { status: 'OPEN', balance: 100 });
 
-  const restarted = wire(Bank, { storage });
+  const restarted = wire(Bank, { storage, services });
   const receipt = success(await restarted.account.deposit('a', 50));
   assert.deepEqual(receipt.reply, { balance: 150 });
   assert.deepEqual(success(await restarted.summary.get('a', { atLeast: receipt })), { balance: 150 });
   const seed = success(await restarted.account.get('a'));
-  const local = Account.create(seed);
+  const local = Account.create(seed, services);
   seed.balance = 0;
   assert.deepEqual(success(local.deposit(25)), { balance: 175 });
   assert.deepEqual(local.getState(), { status: 'OPEN', balance: 175 });

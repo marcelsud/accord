@@ -1,7 +1,7 @@
 import { wire } from "@marcelsud/accord";
 import { Bank, SavingsAccount } from "./domain.js";
 
-const bank = wire(Bank);
+const bank = wire(Bank, { services: { rules: { maximum: 1_000 } } });
 const id = "a-1";
 const [, openError] = await bank.account.open(id);
 if (openError !== null) throw openError;

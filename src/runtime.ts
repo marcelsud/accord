@@ -104,9 +104,10 @@ async function* watch<S>(store: MemoryStore, key: string, read: () => Snapshot<S
   }
 }
 type UnionToIntersection<U> = [U] extends [never] ? {} : (U extends unknown ? (value: U) => void : never) extends (value: infer I) => void ? I : never;
-type CommandUses<A> = A extends Aggregate<any, any, infer C> ? C[keyof C]['uses'] : never;
-type AllUses<M extends AnyModel> = CommandUses<M['aggregates'][keyof M['aggregates']]> | M['consumers'][number]['uses'] | M['workflows'][keyof M['workflows']]['uses'];
-export type ModelServices<M extends AnyModel> = UnionToIntersection<AllUses<M> extends infer U ? U extends Uses ? { [K in keyof U]: ServiceOf<U[K]> } : never : never>;
+type AggregateUses<A> = A extends FactoryAggregate<any, any, any, infer U> ? U
+  : A extends Aggregate<any, any, infer C> ? C[keyof C]['uses'] : never;
+export type ModelUses<M extends AnyModel> = AggregateUses<M['aggregates'][keyof M['aggregates']]> | M['consumers'][number]['uses'] | M['workflows'][keyof M['workflows']]['uses'];
+export type ModelServices<M extends AnyModel> = UnionToIntersection<ModelUses<M> extends infer U ? U extends Uses ? { [K in keyof U]: ServiceOf<U[K]> } : never : never>;
 type ManagedMethod<F> = F extends (...args: infer Args) => infer R
   ? [Awaited<R>] extends [Result<unknown, Tagged>]
     ? (id: string, ...args: Args) => Promise<Result<Receipt<ResultValue<Awaited<R>>>, ResultError<Awaited<R>> | InvalidInput | Unexpected>>
@@ -121,7 +122,7 @@ type AggregateReads<S> = {
 };
 type AggregateClient<A> = A extends AnyAggregateClass
   ? ManagedMethods<Omit<InstanceType<A>, 'getState' | 'pullEvents'>> & AggregateReads<ReturnType<A['initial']>>
-  : A extends FactoryAggregate<any, infer S, infer M> ? ManagedMethods<M> & AggregateReads<S>
+  : A extends FactoryAggregate<any, infer S, infer M, any> ? ManagedMethods<M> & AggregateReads<S>
   : A extends Aggregate<any, infer S, infer C> ? {
     [K in keyof C]: (id: string, input: InputOf<C[K]>, options?: CallOptions) => Promise<Result<Receipt<ReplyOf<C[K]>>, RejectionsOf<C[K]> | RuntimeError>>;
   } & AggregateReads<S> : never;
@@ -152,18 +153,13 @@ export type Runtime<M extends AnyModel> = {
 };
 export type RuntimeOptions<M extends AnyModel> = { readonly storage?: MemoryStore } &
   (keyof ModelServices<M> extends never ? { readonly services?: ModelServices<M> } : { readonly services: ModelServices<M> });
-export function wire<M extends AnyModel>(definition: M, ...options: keyof ModelServices<M> extends never ? [options?: RuntimeOptions<M>] : [options: RuntimeOptions<M>]): Runtime<M> {
-  const store = options[0]?.storage ?? memory();
-  const services = (options[0]?.services ?? {}) as Record<string, unknown>;
-  const prefix = JSON.stringify([definition.name]);
-  const key = (...parts: unknown[]) => JSON.stringify([definition.name, ...parts]);
+export function modelDependencies(definition: AnyModel): ReadonlyMap<string, Dependency<string, unknown>> {
   const definitions = [...Object.values(definition.aggregates), ...Object.values(definition.views), ...definition.consumers, ...Object.values(definition.workflows)] as Array<Source | AnyConsumer | AnyWorkflow>;
   const dependencyNames = new Map<string, Dependency<string, unknown>>();
   const serviceNames = new Map<string, Dependency<string, unknown>>();
   for (const item of definitions) {
     const usesList: Uses[] = item.kind === 'aggregate' ? Object.values(item.commands).map((command: any) => command.uses) : 'uses' in item ? [item.uses] : [];
     for (const uses of usesList) for (const [alias, dependency] of Object.entries(uses)) {
-      if (!Object.hasOwn(services, alias)) throw new TypeError(`Missing dependency: ${alias} (${dependency.name})`);
       const existing = dependencyNames.get(alias);
       if (existing && existing !== dependency) throw new TypeError(`Conflicting dependency alias: ${alias}`);
       const named = serviceNames.get(dependency.name);
@@ -171,6 +167,16 @@ export function wire<M extends AnyModel>(definition: M, ...options: keyof ModelS
       serviceNames.set(dependency.name, dependency);
       dependencyNames.set(alias, dependency);
     }
+  }
+  return dependencyNames;
+}
+export function wire<M extends AnyModel>(definition: M, ...options: keyof ModelServices<M> extends never ? [options?: RuntimeOptions<M>] : [options: RuntimeOptions<M>]): Runtime<M> {
+  const store = options[0]?.storage ?? memory();
+  const services = (options[0]?.services ?? {}) as Record<string, unknown>;
+  const prefix = JSON.stringify([definition.name]);
+  const key = (...parts: unknown[]) => JSON.stringify([definition.name, ...parts]);
+  for (const [alias, dependency] of modelDependencies(definition)) {
+    if (!Object.hasOwn(services, alias)) throw new TypeError(`Missing dependency: ${alias} (${dependency.name})`);
   }
   const context = (uses: Uses, metadata: ExecutionContext = {}): ContextOf<any> => {
     const dependencies = Object.fromEntries(Object.keys(uses).map(alias => [alias, services[alias]]));
@@ -350,8 +356,10 @@ export function wire<M extends AnyModel>(definition: M, ...options: keyof ModelS
         }
       }
       const methodClient = (name: string, prototypeMethod?: (...args: unknown[]) => unknown) =>
-        (id: string, ...args: unknown[]) => execute(id, name, args, {}, async state => {
-          const instance = aggregate.kind === 'class-aggregate' ? new aggregate(structuredClone(state)) : aggregate.create(state);
+        (id: string, ...args: unknown[]) => execute(id, name, args, {}, async (state, metadata) => {
+          const instance = aggregate.kind === 'class-aggregate'
+            ? new aggregate(structuredClone(state))
+            : aggregate.create(state, context(aggregate.uses, metadata));
           const method = prototypeMethod ?? Object.getOwnPropertyDescriptor(instance, name)?.value;
           if (typeof method !== 'function') throw new TypeError(`Missing aggregate method: ${name}`);
           const result: unknown = await method.apply(instance, args);

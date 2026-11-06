@@ -269,13 +269,20 @@ export function aggregate<const N extends string, const S extends SchemaInput, c
 export function aggregate<const N extends string, S extends object, M extends AggregateMethods>(
   name: N, initial: S, factory: (ctx: AggregateContext<NoInfer<S>>) => M,
 ): FactoryAggregate<N, S, M>;
+export function aggregate<const N extends string, S extends object, M extends AggregateMethods, const U extends Uses>(
+  name: N, initial: S, factory: (ctx: AggregateContext<NoInfer<S>, NoInfer<U>>) => M, options: { readonly uses: U },
+): FactoryAggregate<N, S, M, U>;
 export function aggregate(
-  name: string, initial: object, build?: AnyAggregate['evolve'] | ((ctx: AggregateContext<any>) => AggregateMethods),
+  name: string, initial: object, build?: AnyAggregate['evolve'] | ((ctx: AggregateContext<any, any>) => AggregateMethods),
+  options?: { readonly uses: Uses },
 ): AggregateDefinition {
-  if (arguments.length > 3) throw new TypeError('Pass plain state and a factory to aggregate(name, initialState, factory)');
+  if (options) {
+    if (!options.uses || typeof build !== 'function') throw new TypeError('Factory aggregate options require uses and a factory');
+    return createFactoryAggregate(name, initial, build as (ctx: AggregateContext<any, any>) => AggregateMethods, options.uses);
+  }
   if (build === undefined) return createAggregateClass(name, initial);
   if (!('state' in initial && 'commands' in initial && 'initial' in initial && typeof initial.initial === 'function')) {
-    return createFactoryAggregate(name, initial, build as (ctx: AggregateContext<any>) => AggregateMethods);
+    return createFactoryAggregate(name, initial, build as (ctx: AggregateContext<any>) => AggregateMethods, {});
   }
   const contract = initial as Pick<AnyAggregate, 'state' | 'initial' | 'commands'>;
   for (const key of Object.keys(contract.commands)) if (['get', 'events', 'constructor', '__proto__', 'prototype', 'then'].includes(key)) throw new TypeError(`Reserved command name: ${key}`);

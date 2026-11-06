@@ -5,7 +5,8 @@ methods. The initial state contains a status string and a balance in cents.
 The deposit method uses `Balance.of()` for arithmetic and writes the resulting
 cents back to state. [Domain definition](domain.ts)
 
-`wire(Bank)` adds the account ID to the methods.
+`wire(Bank, { services })` supplies the deposit rules and adds the account ID to
+the methods.
 `bank.account.deposit("a-1", 100)` commits the updated snapshot and emitted
 events together.
 
@@ -23,8 +24,9 @@ at the command receipt. It prints account state as
 The runner also deposits 100 into `SavingsAccount`, which holds its balance in
 `{ balance: { cents: 100 } }`. It passes that state to `SavingsAccount.create()`
 and previews a second deposit locally, which returns a balance of 150.
-[`with-effect.ts`](with-effect.ts) calls the same runtime in `Effect.gen` with
-an injected deposit limit. It prints `100`.
+[`with-effect.ts`](with-effect.ts) provides `DepositRules` through a
+`Layer.succeed` layer. Inside `Effect.gen`, `yield* effectify(Bank)` binds the
+rules, and each bank call is yielded directly. It prints `{ balance: 100 }`.
 
 For a standalone test, supply the starting state directly to `Account.create()`.
 Call the method and inspect the resulting state and events.
@@ -32,7 +34,10 @@ Call the method and inspect the resulting state and events.
 ```ts
 import { Account } from "./domain.js";
 
-const account = Account.create({ status: "OPEN", balance: 100 });
+const account = Account.create(
+  { status: "OPEN", balance: 100 },
+  { rules: { maximum: 1_000 } },
+);
 const [reply, error] = account.deposit(50);
 if (error !== null) throw error;
 

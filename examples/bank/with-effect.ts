@@ -1,28 +1,17 @@
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
 import { effectify } from "@marcelsud/accord/effect";
-import { integer, rejection, service, wire } from "@marcelsud/accord";
-import { Bank } from "./domain.js";
+import { Bank, DepositRules } from "./domain.js";
 
-const DepositRules = service("DepositRules", { maximum: integer });
-const DepositLimit = rejection("DepositLimit");
-const bank = wire(Bank);
+const RulesLive = Layer.succeed(effectify(DepositRules), { maximum: 1_000 });
 
 const program = Effect.gen(function* () {
-  const rules = yield* effectify(DepositRules);
-  const amount = 100;
-  if (amount > rules.maximum) return yield* Effect.fail(DepositLimit());
+  const bank = yield* effectify(Bank);
+  const id = "a-1";
 
-  const [, openError] = yield* Effect.promise(() => bank.account.open("a-1"));
-  if (openError !== null) return yield* Effect.fail(openError);
-
-  const [receipt, error] = yield* Effect.promise(() =>
-    bank.account.deposit("a-1", amount),
-  );
-  if (error !== null) return yield* Effect.fail(error);
-  return receipt.reply.balance;
+  yield* bank.account.open(id);
+  const receipt = yield* bank.account.deposit(id, 100);
+  return yield* bank.summary.get(id, { atLeast: receipt });
 });
 
-const balance = await Effect.runPromise(
-  Effect.provideService(program, effectify(DepositRules), { maximum: 1_000 }),
-);
-console.log(balance); // 100
+const summary = await Effect.runPromise(Effect.provide(program, RulesLive));
+console.log(summary); // { balance: 100 }

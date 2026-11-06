@@ -89,6 +89,12 @@ supplied state. Both give you local methods and a fresh event buffer.
 Successful calls commit state and buffered events together. Rejections,
 exceptions, and failed copies discard the working instance.
 
+A factory can declare dependencies with a fourth argument such as
+`{ uses: { rules: DepositRules } }`. The factory receives the resolved
+`rules` alongside `state` and `emit`. Supply the service map through
+`wire(Bank, { services })` for runtime calls or `Account.create(state, services)`
+for a standalone instance. Use `undefined` for the seed to start from defaults.
+
 ## Event-evolved commands
 
 Declare an aggregate contract as `{ state, commands }`. Each command entry
@@ -285,8 +291,17 @@ Stored domain data must support `structuredClone`. HTTP data must additionally
 round-trip through JSON. Instance IDs and schema-backed domain values are
 strings, numbers, booleans, arrays, and records in the bundled examples.
 
-Effect support targets v4.1.2 or newer in the v4 line. Its optional adapter lifts
-dependencies, standalone commands, and Effect-returning handlers. It does
-not convert an arbitrary native callback or runtime client automatically. Native
-dependency shapes remain native, so tuple-returning service calls still need a
-bridge when used inside a generator.
+Effect support targets v4.1.2 or newer in the v4 line. Use
+`yield* effectify(Bank)` to resolve all declared model dependencies and acquire
+an in-process client. Provide the dependencies with Effect layers using keys
+from `effectify(Dependency)`. Acquiring the model builds a runtime with its own
+in-memory store.
+
+Calls that normally return a promise of an Accord tuple become lazy Effects.
+The successful tuple value becomes the Effect result, and its error becomes a
+typed failure. Watch methods return async generators. A caller interrupted
+while waiting on a native call may still see that call finish in the runtime.
+
+The adapter also lifts dependencies, standalone commands, and Effect-returning
+handlers. Native dependency shapes retain their tuple results when called from
+inside a generator. [Effect bank example](../examples/bank/with-effect.ts)

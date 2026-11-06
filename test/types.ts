@@ -1,4 +1,4 @@
-import { Effect } from 'effect';
+import { Effect, Layer } from 'effect';
 import { effectify } from '../src/effect.js';
 import {
   aggregate, command, event, external, fail, wire, integer, match, model, ok, rejection, service, string, vo,
@@ -289,20 +289,25 @@ async function classInference() {
 
 async function factoryInference() {
   const { Account, Bank } = await import('../examples/bank/domain.js');
-  const bank = wire(Bank);
-  const local = Account.create({ status: 'OPEN', balance: 100 });
+  const services = { rules: { maximum: 1_000 } };
+  // @ts-expect-error Factory dependencies must be supplied to native wire().
+  wire(Bank);
+  const bank = wire(Bank, { services });
+  // @ts-expect-error Standalone factory calls require their declared services.
+  Account.create();
+  const local = Account.create({ status: 'OPEN', balance: 100 }, services);
   type SavedState = Expect<Equal<ReturnType<typeof local.getState>, { status: 'PENDING' | 'OPEN' | 'CLOSED'; balance: number }>>;
   // @ts-expect-error The factory state contains cents.
-  Account.create({ status: 'OPEN', balance: { cents: 100 } });
+  Account.create({ status: 'OPEN', balance: { cents: 100 } }, services);
   // @ts-expect-error Status is a literal union.
-  Account.create({ status: 'ACTIVE', balance: 100 });
+  Account.create({ status: 'ACTIVE', balance: 100 }, services);
   // @ts-expect-error The deposit argument is inferred from the factory method.
   await bank.account.deposit('a', '100');
   const [receipt, error] = await bank.account.deposit('a', 100);
   if (error === null) {
     type FactoryReply = Expect<Equal<typeof receipt.reply, { balance: number }>>;
   } else {
-    type FactoryErrors = Expect<Equal<typeof error._tag, 'NotOpen' | 'InvalidInput' | 'Unexpected'>>;
+    type FactoryErrors = Expect<Equal<typeof error._tag, 'NotOpen' | 'DepositLimit' | 'InvalidInput' | 'Unexpected'>>;
   }
 }
 
@@ -319,3 +324,25 @@ type RawBalance = Expect<Equal<typeof rawBalance, number>>;
 type ProjectedBalance = Expect<Equal<typeof projectedBalance, { cents: number }>>;
 // @ts-expect-error The schema types the input to of().
 ValueBalance.of('100');
+
+async function effectModelInference() {
+  const { Bank, DepositRules } = await import('../examples/bank/domain.js');
+  const acquire = effectify(Bank);
+  type BankRequirements = Expect<Equal<Effect.Services<typeof acquire>, Requirement<typeof DepositRules>>>;
+  // @ts-expect-error The bank's declared service must be provided.
+  Effect.runPromise(acquire);
+
+  const program = Effect.gen(function* () {
+    const bank = yield* acquire;
+    // @ts-expect-error Effect calls keep the factory method arguments.
+    bank.account.deposit('a', '100');
+    const deposit = bank.account.deposit('a', 100);
+    type DepositErrors = Expect<Equal<Effect.Error<typeof deposit>['_tag'], 'DepositLimit' | 'NotOpen' | 'InvalidInput' | 'Unexpected'>>;
+    type DepositRequirements = Expect<Equal<Effect.Services<typeof deposit>, never>>;
+    const receipt = yield* deposit;
+    type DepositReply = Expect<Equal<typeof receipt.reply.balance, number>>;
+    return yield* bank.summary.get('a', { atLeast: receipt });
+  });
+
+  Effect.runPromise(Effect.provide(program, Layer.succeed(effectify(DepositRules), { maximum: 1_000 })));
+}

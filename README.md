@@ -28,7 +28,8 @@ npm run example:effect
 
 The native bank example shows flat account state and nested savings state. It
 seeds a standalone savings account from the stored state and previews a balance
-of 150. The Effect example uses the account factory and prints 100.
+of 150. The Effect example provides deposit rules through a layer and prints
+`{ balance: 100 }`.
 [Bank walkthrough](examples/bank/README.md)
 
 For a complete integration example, run both versions with a SQLite ledger and
@@ -194,8 +195,9 @@ import { service, integer } from "@marcelsud/accord";
 const DepositRules = service("DepositRules", { maximum: integer });
 ```
 
-Add `uses: { rules: DepositRules }` to an operation's contract. Its native body
-receives the typed dependency as `ctx.rules`. Supply the implementation through
+Add `uses: { rules: DepositRules }` to an operation's contract or pass it in the
+fourth argument to a factory aggregate. The body or factory receives the typed
+dependency as `ctx.rules`. Supply the implementation through
 `wire(Model, { services: { rules: { maximum: 1_000 } } })`.
 
 Service names identify dependencies and must be unique. Each alias must refer
@@ -205,19 +207,26 @@ from the runtime; HTTP callers cannot provide an actor or dependency bindings.
 
 ## Add optional Effect integration
 
-Install Effect separately. The core entry point never imports it. A class method
-runs through the native runtime and can be called inside `Effect.gen`:
+Install Effect separately. `effectify(Bank)` resolves declared services from
+Effect's environment and returns a client whose calls are lazy Effects.
 
 ```ts
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
+import { effectify } from "@marcelsud/accord/effect";
+import { Bank, DepositRules } from "./domain.js";
+
+const RulesLive = Layer.succeed(effectify(DepositRules), { maximum: 1_000 });
 
 const program = Effect.gen(function* () {
-  const [receipt, error] = yield* Effect.promise(() =>
-    bank.account.deposit("a-1", 100),
-  );
-  if (error !== null) return yield* Effect.fail(error);
-  return receipt.reply.balance;
+  const bank = yield* effectify(Bank);
+  const id = "a-1";
+
+  yield* bank.account.open(id);
+  const receipt = yield* bank.account.deposit(id, 100);
+  return yield* bank.summary.get(id, { atLeast: receipt });
 });
+
+const summary = await Effect.runPromise(Effect.provide(program, RulesLive));
 ```
 
 Use `effectify(Dependency)` to get a stable Effect service key. Use
