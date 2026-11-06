@@ -1,5 +1,5 @@
 import { wire } from "@marcelsud/accord";
-import { Account, Bank } from "./domain.js";
+import { Bank, SavingsAccount } from "./domain.js";
 
 const bank = wire(Bank);
 const id = "a-1";
@@ -16,8 +16,16 @@ console.log("Balance view:", summary); // { balance: 100 }
 const [state, stateError] = await bank.account.get(id);
 if (stateError !== null) throw stateError;
 
-const preview = Account.restore(state);
+console.log("Account snapshot:", state); // { status: "OPEN", balance: 100 }
+
+const [, savingsError] = await bank.savings.deposit(id, 100);
+if (savingsError !== null) throw savingsError;
+
+const [snapshot, snapshotError] = await bank.savings.get(id);
+if (snapshotError !== null) throw snapshotError;
+console.log("Savings snapshot:", snapshot); // { balance: { cents: 100 } }
+
+const preview = SavingsAccount.create(snapshot);
 const [reply, previewError] = preview.deposit(50);
 if (previewError !== null) throw previewError;
-console.log("Standalone preview:", reply); // { balance: 150 }
-console.log("Pending events:", preview.pullEvents());
+console.log("Standalone savings preview:", reply); // { balance: 150 }

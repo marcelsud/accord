@@ -121,7 +121,7 @@ type AggregateReads<S> = {
 };
 type AggregateClient<A> = A extends AnyAggregateClass
   ? ManagedMethods<Omit<InstanceType<A>, 'getState' | 'pullEvents'>> & AggregateReads<ReturnType<A['initial']>>
-  : A extends FactoryAggregate<any, infer P, infer M> ? ManagedMethods<M> & AggregateReads<P>
+  : A extends FactoryAggregate<any, infer S, infer M> ? ManagedMethods<M> & AggregateReads<S>
   : A extends Aggregate<any, infer S, infer C> ? {
     [K in keyof C]: (id: string, input: InputOf<C[K]>, options?: CallOptions) => Promise<Result<Receipt<ReplyOf<C[K]>>, RejectionsOf<C[K]> | RuntimeError>>;
   } & AggregateReads<S> : never;
@@ -351,7 +351,7 @@ export function wire<M extends AnyModel>(definition: M, ...options: keyof ModelS
       }
       const methodClient = (name: string, prototypeMethod?: (...args: unknown[]) => unknown) =>
         (id: string, ...args: unknown[]) => execute(id, name, args, {}, async state => {
-          const instance = aggregate.kind === 'class-aggregate' ? new aggregate(structuredClone(state)) : aggregate.restore(state);
+          const instance = aggregate.kind === 'class-aggregate' ? new aggregate(structuredClone(state)) : aggregate.create(state);
           const method = prototypeMethod ?? Object.getOwnPropertyDescriptor(instance, name)?.value;
           if (typeof method !== 'function') throw new TypeError(`Missing aggregate method: ${name}`);
           const result: unknown = await method.apply(instance, args);

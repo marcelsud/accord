@@ -11,6 +11,7 @@ import {
   rejection,
   union,
   view,
+  vo,
   type Infer,
 } from "@marcelsud/accord";
 
@@ -30,11 +31,9 @@ const Status = {
 
 const Cents = refine(integer, (amount) => amount > 0, "positive cents");
 
-class Balance {
-  private constructor(readonly cents: number) {}
-
-  static of(cents: number): Balance {
-    return new Balance(parse(integer, cents));
+class Balance extends vo("Balance", integer) {
+  get cents() {
+    return this.value;
   }
 
   inc(amount: number): Balance {
@@ -49,7 +48,7 @@ const NotOpen = rejection("NotOpen");
 
 export const Account = aggregate(
   "Account",
-  { status: Status.of("PENDING"), balance: Balance.of(0) },
+  { status: Status.of("PENDING"), balance: 0 },
   ({ state, emit }) => ({
     open() {
       if (state.status !== "PENDING") {
@@ -64,20 +63,25 @@ export const Account = aggregate(
     deposit(amount: number) {
       if (state.status !== "OPEN") return fail(NotOpen());
 
-      state.balance = state.balance.inc(amount);
-      const balance = state.balance.cents;
+      const balance = Balance.of(state.balance).inc(amount).cents;
+      state.balance = balance;
 
       emit(Deposited({ amount, balance }));
       return ok({ balance });
     },
   }),
-  {
-    snapshot: ({ status, balance }) => ({ status, balance: balance.cents }),
-    restore: ({ status, balance }) => ({
-      status: Status.of(status),
-      balance: Balance.of(balance),
-    }),
-  },
+);
+
+export const SavingsAccount = aggregate(
+  "SavingsAccount",
+  { balance: { cents: 0 } },
+  ({ state }) => ({
+    deposit(amount: number) {
+      const balance = Balance.of(state.balance.cents).inc(amount).cents;
+      state.balance.cents = balance;
+      return ok({ balance });
+    },
+  }),
 );
 
 const Summary = view(
@@ -92,6 +96,6 @@ const Summary = view(
 );
 
 export const Bank = model("Bank", {
-  aggregates: { account: Account },
+  aggregates: { account: Account, savings: SavingsAccount },
   views: { summary: Summary },
 });

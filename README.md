@@ -26,9 +26,9 @@ npm run example
 npm run example:effect
 ```
 
-The native bank example prints a stored balance of 100 and a standalone preview
-of 150. The Effect example prints 100. Both use the same account factory with
-a `Balance` value object.
+The native bank example shows flat account state and nested savings state. It
+seeds a standalone savings account from the stored state and previews a balance
+of 150. The Effect example uses the account factory and prints 100.
 [Bank walkthrough](examples/bank/README.md)
 
 For a complete integration example, run both versions with a SQLite ledger and
@@ -86,11 +86,11 @@ on an isolated instance and commits state and events together on `ok()`. A
 `fail()` result or exception discards the working instance.
 [Class aggregate reference](docs/runtime.md#class-aggregates)
 
-Use a factory aggregate to give a group of methods one context. Its
-`snapshot` and `restore` functions convert between working state and stored
-data. The bank example initializes its status with `Status.of("PENDING")`
-and its balance with `Balance.of(0)`. Stored state contains the status string
-and cents. [Factory aggregate reference](docs/runtime.md#factory-aggregates)
+Use a factory aggregate to give a group of methods one context. Factory
+aggregates use the same plain state shape in methods and storage. The bank
+example stores cents and calls `Balance.of()` inside the deposit method.
+`Account.create(state)` seeds a standalone instance from that same shape.
+[Factory aggregate reference](docs/runtime.md#factory-aggregates)
 
 ## Use tagged rejections
 
@@ -119,6 +119,30 @@ Schema primitives are runtime values: `number`, `integer`, `string`, and
 `s.string`, and `s.boolean`. `integer` means a safe integer. Shapes can be nested;
 `optional`, `nullable`, `array`, `literal`, `union`, and `refine` compose them.
 Custom synchronous schemas implement `{ parse(value: unknown): T }`.
+
+## Define value objects
+
+Extend `vo(name, schema)` to validate the underlying value and add domain methods.
+The inherited `of()` returns the subclass. `snapshot()` returns a copy of the raw
+data, and `snapshot(project)` maps that copy to a format chosen by the caller.
+Use raw values that round-trip through `structuredClone`.
+
+```ts
+import { integer, vo } from "@marcelsud/accord";
+
+class Balance extends vo("Balance", integer) {
+  inc(amount: number): Balance {
+    return Balance.of(this.value + amount);
+  }
+}
+
+const balance = Balance.of(100).inc(50);
+balance.snapshot(); // 150
+balance.snapshot((cents) => ({ cents })); // { cents: 150 }
+```
+
+The bank uses `Balance` for arithmetic inside its methods and stores cents
+in aggregate state. [Bank domain](examples/bank/domain.ts)
 
 ## Check tuples before using values
 
@@ -207,7 +231,7 @@ requirements. See the [Effect bank example](examples/bank/with-effect.ts) and th
 | Primitive | Handler and behavior |
 | --- | --- |
 | `aggregate(name, initialState)` | Class base with inferred state, factories, and event collection |
-| `aggregate(name, initialState, factory, codec)` | Methods share a context and use an explicit state codec |
+| `aggregate(name, initialState, factory)` | Methods share a context and use one state shape for working and stored data |
 | `aggregate(name, contract, evolve)` | `(state, event) => state`; infers events from commands |
 | `view(name, contract, evolve)` | `(state, event, envelope) => state`; replays history, supports routing and versions |
 | `policy(name, contract, body)` | `(envelope, ctx) => Result`; handles new events only |

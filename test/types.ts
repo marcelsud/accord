@@ -1,7 +1,7 @@
 import { Effect } from 'effect';
 import { effectify } from '../src/effect.js';
 import {
-  aggregate, command, event, external, fail, wire, integer, match, model, ok, rejection, service, string,
+  aggregate, command, event, external, fail, wire, integer, match, model, ok, rejection, service, string, vo,
   type Infer, type ReplyOf, type Requirement, type Result,
 } from '../src/index.js';
 import { Account, AlreadyOpen, Balance, Bank, Cents, Deposited, InsufficientFunds, NotOpen, Opened, State, deposit } from './fixtures.js';
@@ -290,12 +290,12 @@ async function classInference() {
 async function factoryInference() {
   const { Account, Bank } = await import('../examples/bank/domain.js');
   const bank = wire(Bank);
-  const local = Account.restore({ status: 'OPEN', balance: 100 });
+  const local = Account.create({ status: 'OPEN', balance: 100 });
   type SavedState = Expect<Equal<ReturnType<typeof local.getState>, { status: 'PENDING' | 'OPEN' | 'CLOSED'; balance: number }>>;
-  // @ts-expect-error The snapshot contains cents.
-  Account.restore({ status: 'OPEN', balance: { cents: 100 } });
+  // @ts-expect-error The factory state contains cents.
+  Account.create({ status: 'OPEN', balance: { cents: 100 } });
   // @ts-expect-error Status is a literal union.
-  Account.restore({ status: 'ACTIVE', balance: 100 });
+  Account.create({ status: 'ACTIVE', balance: 100 });
   // @ts-expect-error The deposit argument is inferred from the factory method.
   await bank.account.deposit('a', '100');
   const [receipt, error] = await bank.account.deposit('a', 100);
@@ -305,3 +305,17 @@ async function factoryInference() {
     type FactoryErrors = Expect<Equal<typeof error._tag, 'NotOpen' | 'InvalidInput' | 'Unexpected'>>;
   }
 }
+
+class ValueBalance extends vo('ValueBalance', integer) {
+  inc(amount: number): ValueBalance {
+    return ValueBalance.of(this.value + amount);
+  }
+}
+const valueBalance = ValueBalance.of(100);
+const rawBalance = valueBalance.snapshot();
+const projectedBalance = valueBalance.snapshot(cents => ({ cents }));
+type ConstructedBalance = Expect<Equal<typeof valueBalance, ValueBalance>>;
+type RawBalance = Expect<Equal<typeof rawBalance, number>>;
+type ProjectedBalance = Expect<Equal<typeof projectedBalance, { cents: number }>>;
+// @ts-expect-error The schema types the input to of().
+ValueBalance.of('100');

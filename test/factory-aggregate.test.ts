@@ -4,7 +4,8 @@ import { aggregate, event, fail, integer, memory, model, ok, rejection, wire } f
 import { Account, Bank } from '../examples/bank/domain.js';
 import { failure, success } from './helpers.js';
 
-test('factory aggregates restore value objects from stored snapshots and deliver their events', async () => {
+test('factory aggregates share one state shape across stored and standalone calls', async () => {
+  assert.deepEqual(Account.create().getState(), { status: 'PENDING', balance: 0 });
   const storage = memory();
   const bank = wire(Bank, { storage });
   assert.equal(failure(await bank.account.deposit('a', 10))._tag, 'NotOpen');
@@ -16,17 +17,19 @@ test('factory aggregates restore value objects from stored snapshots and deliver
   const receipt = success(await restarted.account.deposit('a', 50));
   assert.deepEqual(receipt.reply, { balance: 150 });
   assert.deepEqual(success(await restarted.summary.get('a', { atLeast: receipt })), { balance: 150 });
-  const local = Account.restore(success(await restarted.account.get('a')));
+  const seed = success(await restarted.account.get('a'));
+  const local = Account.create(seed);
+  seed.balance = 0;
   assert.deepEqual(success(local.deposit(25)), { balance: 175 });
   assert.deepEqual(local.getState(), { status: 'OPEN', balance: 175 });
   assert.deepEqual(local.pullEvents(), [{ _tag: 'Deposited', amount: 25, balance: 175 }]);
   assert.deepEqual(success(await restarted.account.get('a')), { status: 'OPEN', balance: 150 });
 });
 
-test('factory calls use one isolated context and discard changes on rejection or failed snapshot', async () => {
+test('factory calls use one isolated context and discard changes on rejection or exception', async () => {
   const Changed = event('Changed', { value: integer });
   const Rejected = rejection('Rejected');
-  const defect = new Error('cannot save negative value');
+  const defect = new Error('negative value');
   let contexts = 0;
   const Counter = aggregate('Counter', { value: 0 }, ({ state, emit }) => {
     contexts++;
@@ -34,15 +37,10 @@ test('factory calls use one isolated context and discard changes on rejection or
       change(value: number, reject = false) {
         state.value = value;
         emit(Changed({ value }));
+        if (value < 0) throw defect;
         return reject ? fail(Rejected()) : ok(value);
       },
     };
-  }, {
-    snapshot(state) {
-      if (state.value < 0) throw defect;
-      return state;
-    },
-    restore: state => state,
   });
   const runtime = wire(model('Counters', { aggregates: { counter: Counter } }));
   const client = runtime.counter;

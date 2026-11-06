@@ -1,4 +1,4 @@
-import { createFactoryAggregate, type AggregateContext, type AggregateMethods, type AggregateStateCodec, type AnyFactoryAggregate, type FactoryAggregate } from './factory-aggregate.js';
+import { createFactoryAggregate, type AggregateContext, type AggregateMethods, type AnyFactoryAggregate, type FactoryAggregate } from './factory-aggregate.js';
 import { createAggregateClass, type AggregateClass, type AnyAggregateClass } from './class-aggregate.js';
 import { object, parse, type Infer, type Schema, type SchemaInput, type Shape } from './schema.js';
 import { fail, ok, unexpected, type InvalidInput, type Result, type Tagged, type Unexpected } from './result.js';
@@ -261,20 +261,22 @@ export interface AnyAggregate {
   readonly events: readonly AnyTaggedFactory[]; readonly evolve: (state: any, event: any) => any;
 }
 export type AggregateDefinition = AnyAggregate | AnyAggregateClass | AnyFactoryAggregate;
-export function aggregate<const N extends string, S extends object, P extends object, M extends AggregateMethods>(
-  name: N, initial: S, factory: (ctx: AggregateContext<NoInfer<S>>) => M, codec: AggregateStateCodec<NoInfer<S>, P>,
-): FactoryAggregate<N, P, M>;
 export function aggregate<const N extends string, S extends object>(name: N, initial: S): AggregateClass<N, S>;
 export function aggregate<const N extends string, const S extends SchemaInput, const C extends Record<string, Command<Infer<S>, any, any, any, any, any>>>(
   name: N, contract: { readonly state: S; readonly initial: () => Infer<S>; readonly commands: C },
   evolve: (state: Infer<S>, event: EventsOf<C[keyof C]>) => Infer<S>,
 ): Aggregate<N, Infer<S>, C>;
+export function aggregate<const N extends string, S extends object, M extends AggregateMethods>(
+  name: N, initial: S, factory: (ctx: AggregateContext<NoInfer<S>>) => M,
+): FactoryAggregate<N, S, M>;
 export function aggregate(
   name: string, initial: object, build?: AnyAggregate['evolve'] | ((ctx: AggregateContext<any>) => AggregateMethods),
-  codec?: AggregateStateCodec<any, any>,
 ): AggregateDefinition {
-  if (codec) return createFactoryAggregate(name, initial, build as (ctx: AggregateContext<any>) => AggregateMethods, codec);
+  if (arguments.length > 3) throw new TypeError('Pass plain state and a factory to aggregate(name, initialState, factory)');
   if (build === undefined) return createAggregateClass(name, initial);
+  if (!('state' in initial && 'commands' in initial && 'initial' in initial && typeof initial.initial === 'function')) {
+    return createFactoryAggregate(name, initial, build as (ctx: AggregateContext<any>) => AggregateMethods);
+  }
   const contract = initial as Pick<AnyAggregate, 'state' | 'initial' | 'commands'>;
   for (const key of Object.keys(contract.commands)) if (['get', 'events', 'constructor', '__proto__', 'prototype', 'then'].includes(key)) throw new TypeError(`Reserved command name: ${key}`);
   for (const [name, command] of Object.entries(contract.commands)) {

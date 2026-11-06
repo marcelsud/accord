@@ -6,20 +6,14 @@ export interface AggregateContext<S extends object> {
   emit<E extends Tagged>(event: E): void;
 }
 
-export interface AggregateStateCodec<S extends object, P extends object> {
-  readonly snapshot: (state: S) => P;
-  readonly restore: (state: NoInfer<P>) => S;
-}
-
 export type AggregateMethods = Record<string, (...args: any[]) => unknown>;
-type FactoryInstance<P, M> = M & { getState(): P; pullEvents(): Tagged[] };
+type FactoryInstance<S, M> = M & { getState(): S; pullEvents(): Tagged[] };
 
-export interface FactoryAggregate<N extends string, P extends object, M extends AggregateMethods> {
+export interface FactoryAggregate<N extends string, S extends object, M extends AggregateMethods> {
   readonly kind: 'factory-aggregate';
   readonly name: N;
-  readonly initial: () => P;
-  readonly create: () => FactoryInstance<P, M>;
-  readonly restore: (snapshot: P) => FactoryInstance<P, M>;
+  readonly initial: () => S;
+  readonly create: (state?: S) => FactoryInstance<S, M>;
 }
 
 export type AnyFactoryAggregate = FactoryAggregate<string, any, AggregateMethods>;
@@ -28,12 +22,12 @@ export function isReservedFactoryMethod(name: string): boolean {
   return name === 'toJSON' || isReservedAggregateMethod(name);
 }
 
-export function createFactoryAggregate<N extends string, S extends object, P extends object, M extends AggregateMethods>(
-  name: N, initial: S, factory: (ctx: AggregateContext<S>) => M, codec: AggregateStateCodec<S, P>,
-): FactoryAggregate<N, P, M> {
-  const defaults = structuredClone(codec.snapshot(initial));
-  const restore = (snapshot: P): FactoryInstance<P, M> => {
-    const state = codec.restore(structuredClone(snapshot));
+export function createFactoryAggregate<N extends string, S extends object, M extends AggregateMethods>(
+  name: N, initial: S, factory: (ctx: AggregateContext<S>) => M,
+): FactoryAggregate<N, S, M> {
+  const defaults = structuredClone(initial);
+  const create = (seed: S = defaults): FactoryInstance<S, M> => {
+    const state = structuredClone(seed);
     const events: Tagged[] = [];
     const methods = factory({ state, emit: event => events.push(cloneEmittedEvent(event)) });
     const instance = Object.create(null);
@@ -43,12 +37,12 @@ export function createFactoryAggregate<N extends string, S extends object, P ext
       instance[name] = method;
     }
     return Object.defineProperties(instance, {
-      getState: { value: () => structuredClone(codec.snapshot(state)) },
+      getState: { value: () => structuredClone(state) },
       pullEvents: { value: () => events.splice(0) },
-    }) as FactoryInstance<P, M>;
+    }) as FactoryInstance<S, M>;
   };
   return {
     kind: 'factory-aggregate', name, initial: () => structuredClone(defaults),
-    create: () => restore(defaults), restore,
+    create,
   };
 }

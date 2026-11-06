@@ -23,24 +23,6 @@ exposes prototype methods that return an `ok()` or `fail()` tuple, synchronously
 or asynchronously. It prepends the instance ID and forwards the remaining
 arguments to the method. Input checks belong in the method or its caller.
 
-```ts
-const bank = wire(Bank);
-const [, openError] = await bank.account.open("a-1");
-if (openError !== null) throw openError;
-
-const [receipt, error] = await bank.account.deposit("a-1", 100);
-if (error !== null) throw error;
-
-const [state, readError] = await bank.account.get("a-1");
-if (readError !== null) throw readError;
-const preview = Account.restore(state);
-const [reply, previewError] = preview.deposit(50);
-if (previewError !== null) throw previewError;
-
-console.log(receipt.reply.balance); // 100
-console.log(reply.balance); // 150
-```
-
 Calls for an ID run in order. Each call starts from a copy of stored state or the
 defaults for a fresh ID. The runtime checks the returned tuple. A successful
 call saves state, emitted events, and a receipt together. A rejection, exception,
@@ -61,55 +43,51 @@ when a method emits nothing. Pass the receipt to
 position.
 
 Class methods are available through the in-process client. HTTP exposure uses
-explicitly registered `command()` definitions. A class test can start from
-`Account.restore(state)` and inspect the resulting state and pending events
-directly.
+explicitly registered `command()` definitions. To seed a standalone instance,
+call the aggregate class's `restore(state)` and inspect the resulting state
+and pending events directly.
 
 ## Factory aggregates
 
-Pass a factory and a state codec to
-`aggregate(name, initialState, factory, { snapshot, restore })`. The factory
-takes `{ state, emit }` and returns an object of methods. Those methods share
-one context. Use the same typed calls through `wire()` as for class aggregates.
+Pass a factory to `aggregate(name, initialState, factory)`. The factory takes
+`{ state, emit }` and returns an object of methods. Those methods share one
+context and can be called through `wire()`. Use data that round-trips through
+`structuredClone` for state. The stored state has the same shape as
+`ctx.state`.
 
 ```ts
 const Account = aggregate(
   "Account",
-  { status: Status.of("PENDING"), balance: Balance.of(0) },
+  { status: Status.of("PENDING"), balance: 0 },
   ({ state, emit }) => ({
     deposit(amount: number) {
       if (state.status !== "OPEN") return fail(NotOpen());
 
-      state.balance = state.balance.inc(amount);
-      const balance = state.balance.cents;
+      const balance = Balance.of(state.balance).inc(amount).cents;
+      state.balance = balance;
       emit(Deposited({ amount, balance }));
       return ok({ balance });
     },
   }),
-  {
-    snapshot: ({ status, balance }) => ({ status, balance: balance.cents }),
-    restore: ({ status, balance }) => ({
-      status: Status.of(status),
-      balance: Balance.of(balance),
-    }),
-  },
 );
 ```
 
-`snapshot` receives working state and returns cloneable data. `restore` receives
-a copy of that data and builds fresh working state, including any value objects.
-Defaults are captured through `snapshot` when the aggregate is defined.
+The deposit method constructs a `Balance` for the calculation and writes
+the resulting cents back to state. The savings aggregate uses the same value
+object with a nested `{ balance: { cents } }` state shape.
+[Bank domain](../examples/bank/domain.ts)
+
 `wire()` resolves methods lazily. Each call restores an isolated instance and
 runs the factory once, then looks up the requested method. A missing method
 returns `Unexpected`. TypeScript infers the method signatures from the factory's
 return type. `Object.keys()` lists the client's read helpers, while method names
 come from the factory at invocation time.
 
-`Account.create()` uses the defaults, and `Account.restore(snapshot)` starts
-from supplied data. Both give you local methods and a fresh event buffer.
-`getState()` and `bank.account.get(id)` return the stored shape defined by
-`snapshot`. Successful calls commit that snapshot with the buffered events.
-Rejections, exceptions, and snapshot failures discard the working instance.
+`Account.create()` copies the defaults, and `Account.create(state)` copies
+supplied state. Both give you local methods and a fresh event buffer.
+`getState()` and `bank.account.get(id)` return copies of the state.
+Successful calls commit state and buffered events together. Rejections,
+exceptions, and failed copies discard the working instance.
 
 ## Event-evolved commands
 
