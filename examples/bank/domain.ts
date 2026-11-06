@@ -3,37 +3,82 @@ import {
   event,
   fail,
   integer,
+  literal,
   model,
   ok,
+  parse,
   refine,
   rejection,
+  union,
   view,
+  type Infer,
 } from "@marcelsud/accord";
 
-const Cents = refine(integer, (value) => value > 0, "positive cents");
-const Opened = event("Opened");
-const Deposited = event("Deposited", { amount: Cents, balance: integer });
-const AlreadyOpen = rejection("AlreadyOpen");
-const NotOpen = rejection("NotOpen");
+const StatusSchema = union(
+  literal("PENDING"),
+  literal("OPEN"),
+  literal("CLOSED"),
+);
 
-export class Account extends aggregate("Account", { open: false, balance: 0 }) {
-  open() {
-    if (this.state.open) return fail(AlreadyOpen());
+type Status = Infer<typeof StatusSchema>;
 
-    this.state.open = true;
-    this.emit(Opened());
-    return ok(undefined);
+const Status = {
+  of(value: Status): Status {
+    return parse(StatusSchema, value);
+  },
+};
+
+const Cents = refine(integer, (amount) => amount > 0, "positive cents");
+
+class Balance {
+  private constructor(readonly cents: number) {}
+
+  static of(cents: number): Balance {
+    return new Balance(parse(integer, cents));
   }
 
-  deposit(amount: number) {
-    if (!this.state.open) return fail(NotOpen());
-
-    const event = Deposited({ amount, balance: this.state.balance + amount });
-    this.state.balance = event.balance;
-    this.emit(event);
-    return ok({ balance: event.balance });
+  inc(amount: number): Balance {
+    return Balance.of(this.cents + parse(Cents, amount));
   }
 }
+
+const Opened = event("Opened");
+const Deposited = event("Deposited", { amount: Cents, balance: integer });
+const CannotOpen = rejection("CannotOpen", { status: StatusSchema });
+const NotOpen = rejection("NotOpen");
+
+export const Account = aggregate(
+  "Account",
+  { status: Status.of("PENDING"), balance: Balance.of(0) },
+  ({ state, emit }) => ({
+    open() {
+      if (state.status !== "PENDING") {
+        return fail(CannotOpen({ status: state.status }));
+      }
+
+      state.status = Status.of("OPEN");
+      emit(Opened());
+      return ok(undefined);
+    },
+
+    deposit(amount: number) {
+      if (state.status !== "OPEN") return fail(NotOpen());
+
+      state.balance = state.balance.inc(amount);
+      const balance = state.balance.cents;
+
+      emit(Deposited({ amount, balance }));
+      return ok({ balance });
+    },
+  }),
+  {
+    snapshot: ({ status, balance }) => ({ status, balance: balance.cents }),
+    restore: ({ status, balance }) => ({
+      status: Status.of(status),
+      balance: Balance.of(balance),
+    }),
+  },
+);
 
 const Summary = view(
   "Summary",

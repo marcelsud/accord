@@ -1,6 +1,6 @@
 # Runtime and transport reference
 
-All examples are excerpts. The class bank is defined in
+All examples are excerpts. The factory bank is defined in
 [`examples/bank/domain.ts`](../examples/bank/domain.ts). The HTTP and history
 examples below use an event-evolved bank with explicitly declared commands.
 
@@ -64,6 +64,50 @@ Class methods are available through the in-process client. HTTP exposure uses
 explicitly registered `command()` definitions. A class test can start from
 `Account.restore(state)` and inspect the resulting state and pending events
 directly.
+
+## Factory aggregates
+
+Pass a factory and a state codec to
+`aggregate(name, initialState, factory, { snapshot, restore })`. The factory
+takes `{ state, emit }` and returns an object of methods. Those methods share
+one context. Use the same typed calls through `wire()` as for class aggregates.
+
+```ts
+const Account = aggregate(
+  "Account",
+  { status: Status.of("PENDING"), balance: Balance.of(0) },
+  ({ state, emit }) => ({
+    deposit(amount: number) {
+      if (state.status !== "OPEN") return fail(NotOpen());
+
+      state.balance = state.balance.inc(amount);
+      const balance = state.balance.cents;
+      emit(Deposited({ amount, balance }));
+      return ok({ balance });
+    },
+  }),
+  {
+    snapshot: ({ status, balance }) => ({ status, balance: balance.cents }),
+    restore: ({ status, balance }) => ({
+      status: Status.of(status),
+      balance: Balance.of(balance),
+    }),
+  },
+);
+```
+
+`snapshot` receives working state and returns cloneable data. `restore` receives
+a copy of that data and builds fresh working state, including any value objects.
+Defaults are captured through `snapshot` when the aggregate is defined. Return
+the same method names for every state. `wire()` creates a temporary instance to
+discover the names, then creates an isolated instance for each managed call.
+Keep factory setup free of external side effects.
+
+`Account.create()` uses the defaults, and `Account.restore(snapshot)` starts
+from supplied data. Both give you local methods and a fresh event buffer.
+`getState()` and `bank.account.get(id)` return the stored shape defined by
+`snapshot`. Successful calls commit that snapshot with the buffered events.
+Rejections, exceptions, and snapshot failures discard the working instance.
 
 ## Event-evolved commands
 

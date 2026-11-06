@@ -1,5 +1,19 @@
 import type { Tagged } from './result.js';
 
+export function cloneEmittedEvent<E extends Tagged>(event: E): E {
+  const copy = structuredClone(event);
+  if (!copy || typeof copy !== 'object' || typeof copy._tag !== 'string') {
+    throw new TypeError('An emitted event must have a string tag');
+  }
+  return copy;
+}
+
+export function checkAggregateMethodName(name: string): void {
+  if (['get', 'events', 'getState', 'pullEvents', 'emit', 'constructor', '__proto__', 'prototype', 'then'].includes(name)) {
+    throw new TypeError(`Reserved aggregate method name: ${name}`);
+  }
+}
+
 class AggregateState<S extends object> {
   protected state: S;
   #events: Tagged[] = [];
@@ -13,11 +27,7 @@ class AggregateState<S extends object> {
   }
 
   protected emit<E extends Tagged>(event: E): void {
-    const copy = structuredClone(event);
-    if (!copy || typeof copy !== 'object' || typeof copy._tag !== 'string') {
-      throw new TypeError('An emitted event must have a string tag');
-    }
-    this.#events.push(copy);
+    this.#events.push(cloneEmittedEvent(event));
   }
 
   pullEvents(): Tagged[] {
@@ -56,9 +66,7 @@ export function classMethods(definition: AnyAggregateClass): Map<string, (...arg
       if (seen.has(name)) continue;
       seen.add(name);
       if (typeof descriptor.value !== 'function') continue;
-      if (['get', 'events', 'getState', 'pullEvents', 'emit', '__proto__', 'prototype', 'then'].includes(name)) {
-        throw new TypeError(`Reserved aggregate method name: ${name}`);
-      }
+      checkAggregateMethodName(name);
       methods.set(name, descriptor.value);
     }
   }

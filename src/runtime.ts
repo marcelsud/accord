@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
 import { classMethods, type AnyAggregateClass } from './class-aggregate.js';
+import type { FactoryAggregate } from './factory-aggregate.js';
 import { parse, type Infer, type SchemaInput } from './schema.js';
 import { fail, ok, unexpected, type InvalidInput, type Result, type ResultError, type ResultValue, type Tagged, type Unexpected } from './result.js';
 import {
@@ -36,7 +37,7 @@ export function model<
   const sources = new Set([...Object.values(contract.aggregates), ...Object.values(views)]);
   for (const definition of [...Object.values(views), ...consumers] as Array<AnyView | AnyConsumer>) {
     if (!sources.has(definition.from)) throw new TypeError(`Unregistered source for ${definition.name}`);
-    if (definition.from.kind !== 'class-aggregate') {
+    if (definition.from.kind === 'aggregate' || definition.from.kind === 'view') {
       const events = definition.from.kind === 'aggregate' ? definition.from.events : definition.from.on;
       for (const event of definition.on) if (!events.includes(event)) throw new TypeError(`Unknown source event: ${definition.name}.${event.name}`);
     }
@@ -106,21 +107,21 @@ type UnionToIntersection<U> = [U] extends [never] ? {} : (U extends unknown ? (v
 type CommandUses<A> = A extends Aggregate<any, any, infer C> ? C[keyof C]['uses'] : never;
 type AllUses<M extends AnyModel> = CommandUses<M['aggregates'][keyof M['aggregates']]> | M['consumers'][number]['uses'] | M['workflows'][keyof M['workflows']]['uses'];
 export type ModelServices<M extends AnyModel> = UnionToIntersection<AllUses<M> extends infer U ? U extends Uses ? { [K in keyof U]: ServiceOf<U[K]> } : never : never>;
-type ClassMethod<F> = F extends (...args: infer Args) => infer R
+type ManagedMethod<F> = F extends (...args: infer Args) => infer R
   ? [Awaited<R>] extends [Result<unknown, Tagged>]
     ? (id: string, ...args: Args) => Promise<Result<Receipt<ResultValue<Awaited<R>>>, ResultError<Awaited<R>> | InvalidInput | Unexpected>>
     : never
   : never;
-type ClassMethods<A extends AnyAggregateClass> = {
-  [K in Exclude<keyof InstanceType<A> & string, 'getState' | 'pullEvents'> as
-    ClassMethod<InstanceType<A>[K]> extends never ? never : K]: ClassMethod<InstanceType<A>[K]>;
+type ManagedMethods<M> = {
+  [K in keyof M & string as ManagedMethod<M[K]> extends never ? never : K]: ManagedMethod<M[K]>;
 };
 type AggregateReads<S> = {
   get(id: string): Promise<Result<S, Unexpected>>;
   events(id: string, options?: { after?: number }): Promise<Result<readonly Envelope[], Unexpected>>;
 };
 type AggregateClient<A> = A extends AnyAggregateClass
-  ? ClassMethods<A> & AggregateReads<ReturnType<A['initial']>>
+  ? ManagedMethods<Omit<InstanceType<A>, 'getState' | 'pullEvents'>> & AggregateReads<ReturnType<A['initial']>>
+  : A extends FactoryAggregate<any, infer P, infer M> ? ManagedMethods<M> & AggregateReads<P>
   : A extends Aggregate<any, infer S, infer C> ? {
     [K in keyof C]: (id: string, input: InputOf<C[K]>, options?: CallOptions) => Promise<Result<Receipt<ReplyOf<C[K]>>, RejectionsOf<C[K]> | RuntimeError>>;
   } & AggregateReads<S> : never;
@@ -313,7 +314,7 @@ export function wire<M extends AnyModel>(definition: M, ...options: keyof ModelS
         const [decision, error] = await decide(initial, { ...callOptions, commandId, at });
         if (error !== null) return fail(error);
         if (callOptions.signal?.aborted) throw callOptions.signal.reason;
-        const state = aggregate.kind === 'class-aggregate' ? decision.state : decision.events.reduce(
+        const state = aggregate.kind !== 'aggregate' ? decision.state : decision.events.reduce(
           (state, event) => parse(aggregate.state, aggregate.evolve(structuredClone(state), structuredClone(event))),
           structuredClone(initial),
         );
@@ -323,7 +324,7 @@ export function wire<M extends AnyModel>(definition: M, ...options: keyof ModelS
         });
         const receipt: Receipt = {
           commandId, stream, events, reply: decision.reply,
-          ...(aggregate.kind === 'class-aggregate'
+          ...(aggregate.kind !== 'aggregate'
             ? { version: version + 1, eventCursor: cursor + events.length }
             : { version: cursor + events.length }),
         };
@@ -337,7 +338,7 @@ export function wire<M extends AnyModel>(definition: M, ...options: keyof ModelS
         return ok(response);
       } catch (cause) { return fail(unexpected(cause)); }
     });
-    if (aggregate.kind === 'class-aggregate') {
+    if (aggregate.kind !== 'aggregate') {
       const schemas = new Map<string, AnyTaggedFactory>();
       for (const consumer of [...Object.values(definition.views), ...definition.consumers] as Array<AnyView | AnyConsumer>) {
         if (consumer.from !== aggregate) continue;
@@ -347,9 +348,13 @@ export function wire<M extends AnyModel>(definition: M, ...options: keyof ModelS
           schemas.set(factory.name, factory);
         }
       }
-      for (const [name, method] of classMethods(aggregate)) {
+      const methods = aggregate.kind === 'class-aggregate' ? classMethods(aggregate)
+        : new Map(Object.keys(aggregate.create()).map(name => [name, undefined]));
+      for (const [name, prototypeMethod] of methods) {
         client[name] = (id: string, ...args: unknown[]) => execute(id, name, args, {}, async state => {
-          const instance = new aggregate(structuredClone(state));
+          const instance = aggregate.kind === 'class-aggregate' ? new aggregate(structuredClone(state)) : aggregate.restore(state);
+          const method = prototypeMethod ?? Object.getOwnPropertyDescriptor(instance, name)?.value;
+          if (typeof method !== 'function') throw new TypeError(`Missing aggregate method: ${name}`);
           const result: unknown = await method.apply(instance, args);
           tuple(result);
           const [reply, error] = result;
@@ -464,7 +469,7 @@ export async function story<M extends AnyModel, R, E extends Tagged>(
       async given(aggregate, id, events) {
         try {
           if (!Object.values(definition.aggregates).includes(aggregate)) throw new TypeError('Unregistered aggregate');
-          if (aggregate.kind !== 'aggregate') throw new TypeError('Class aggregates are restored from state');
+          if (aggregate.kind !== 'aggregate') throw new TypeError('Snapshot aggregates are restored from state');
           const stream = JSON.stringify([definition.name, aggregate.name, id]);
           if (storage.rows.has(stream)) throw new TypeError('History already exists for this instance');
           let state = aggregate.initial();

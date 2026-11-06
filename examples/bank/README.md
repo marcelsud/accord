@@ -1,9 +1,13 @@
 # Bank
 
-The [Account class](domain.ts) defines its initial state and ordinary methods.
-`wire(Bank)` adds the account ID to those methods. For example,
-`bank.account.deposit("a-1", 100)` executes `Account.deposit(100)` against the
-stored account and commits its state and events together.
+The Account factory receives state and `emit` once and returns the account
+methods. `Status.of("PENDING")` and `Balance.of(0)` construct the initial
+values. The codec saves a status string and cents and restores a `Balance`
+for each call. [Domain definition](domain.ts)
+
+`wire(Bank)` adds the account ID to the methods.
+`bank.account.deposit("a-1", 100)` commits the updated snapshot and emitted
+events together.
 
 From the repository root, after `npm run check`:
 
@@ -25,11 +29,11 @@ Call the method and inspect the resulting state and events.
 ```ts
 import { Account } from "./domain.js";
 
-const account = Account.restore({ open: true, balance: 100 });
+const account = Account.restore({ status: "OPEN", balance: 100 });
 const [reply, error] = account.deposit(50);
 if (error !== null) throw error;
 
 console.log(reply); // { balance: 150 }
-console.log(account.getState()); // { open: true, balance: 150 }
+console.log(account.getState()); // { status: "OPEN", balance: 150 }
 console.log(account.pullEvents()); // [{ _tag: "Deposited", amount: 50, balance: 150 }]
 ```

@@ -27,7 +27,8 @@ npm run example:effect
 ```
 
 The native bank example prints a stored balance of 100 and a standalone preview
-of 150. The Effect example prints 100. Both use the same account class.
+of 150. The Effect example prints 100. Both use the same account factory with
+a `Balance` value object.
 [Bank walkthrough](examples/bank/README.md)
 
 For a complete integration example, run both versions with a SQLite ledger and
@@ -50,8 +51,8 @@ To consume a local build, run `npm pack` and install the generated
 
 ## Define business rules
 
-The bank example defines an account as a class. Its initial state supplies the
-type of `this.state`, and its methods supply the types for runtime calls.
+For a class aggregate, the initial state supplies the type of `this.state` and
+the methods supply the types for runtime calls.
 
 ```ts
 import { aggregate, event, integer, model, ok, refine, wire } from "@marcelsud/accord";
@@ -84,6 +85,12 @@ state, call methods through `wire()` with the instance ID first. It runs the met
 on an isolated instance and commits state and events together on `ok()`. A
 `fail()` result or exception discards the working instance.
 [Class aggregate reference](docs/runtime.md#class-aggregates)
+
+Use a factory aggregate to give a group of methods one context. Its
+`snapshot` and `restore` functions convert between working state and stored
+data. The bank example initializes its status with `Status.of("PENDING")`
+and its balance with `Balance.of(0)`. Stored state contains the status string
+and cents. [Factory aggregate reference](docs/runtime.md#factory-aggregates)
 
 ## Use tagged rejections
 
@@ -200,6 +207,7 @@ requirements. See the [Effect bank example](examples/bank/with-effect.ts) and th
 | Primitive | Handler and behavior |
 | --- | --- |
 | `aggregate(name, initialState)` | Class base with inferred state, factories, and event collection |
+| `aggregate(name, initialState, factory, codec)` | Methods share a context and use an explicit state codec |
 | `aggregate(name, contract, evolve)` | `(state, event) => state`; infers events from commands |
 | `view(name, contract, evolve)` | `(state, event, envelope) => state`; replays history, supports routing and versions |
 | `policy(name, contract, body)` | `(envelope, ctx) => Result`; handles new events only |

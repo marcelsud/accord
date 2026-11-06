@@ -286,3 +286,22 @@ async function classInference() {
     type ClassRejections = Expect<Equal<typeof error._tag, 'NotOpen' | 'InvalidInput' | 'Unexpected'>>;
   }
 }
+
+async function factoryInference() {
+  const { Account, Bank } = await import('../examples/bank/domain.js');
+  const bank = wire(Bank);
+  const local = Account.restore({ status: 'OPEN', balance: 100 });
+  type SavedState = Expect<Equal<ReturnType<typeof local.getState>, { status: 'PENDING' | 'OPEN' | 'CLOSED'; balance: number }>>;
+  // @ts-expect-error The snapshot contains cents.
+  Account.restore({ status: 'OPEN', balance: { cents: 100 } });
+  // @ts-expect-error Status is a literal union.
+  Account.restore({ status: 'ACTIVE', balance: 100 });
+  // @ts-expect-error The deposit argument is inferred from the factory method.
+  await bank.account.deposit('a', '100');
+  const [receipt, error] = await bank.account.deposit('a', 100);
+  if (error === null) {
+    type FactoryReply = Expect<Equal<typeof receipt.reply, { balance: number }>>;
+  } else {
+    type FactoryErrors = Expect<Equal<typeof error._tag, 'NotOpen' | 'InvalidInput' | 'Unexpected'>>;
+  }
+}
