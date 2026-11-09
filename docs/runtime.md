@@ -141,10 +141,37 @@ Downstream views consume the forwarded source events. The contract form
 `view(name, { from, on, state, initial, version?, keyOf? }, evolve)` is also
 supported.
 
-`policy(name, { from, on, uses? }, body)` receives one envelope at a time.
-Envelopes include `id`, `stream`, `seq`, `at`, `source`, and `event`. Policies are
-registered from the current source position and skip historical view rebuilds.
-Use the stable envelope `id` as an external idempotency key.
+`policy(name, { from, uses?, version? }, on(Event, handler), ...)` registers one
+or more event handlers. Each handler receives `(event, services, envelope)` and
+returns a `Result` or a promise of one. The first argument is the tagged event
+payload; the second contains declared services and execution context. Handlers
+can omit unused parameters:
+
+```ts
+const NotifyDeposit = policy(
+  "NotifyDeposit",
+  { from: Account, uses: { notifications: Notifications } },
+  on(Deposited, (event, { notifications }, { id, source }) =>
+    notifications.send({
+      eventId: id,
+      accountId: source.id,
+      amount: event.amount,
+      balance: event.balance,
+    }),
+  ),
+);
+```
+
+This excerpt uses the notification example's domain contracts. Envelopes include
+`id`, `stream`, `seq`, `at`, `source`, and `event`. Use the stable envelope `id`
+as an external idempotency key. Duplicate event tags and empty handler lists
+are rejected. Event factories are retained for source validation.
+
+For Effect, use `on(Event, effectify((event, services, envelope) => effect))`.
+The same arguments are available, and `uses` supplies the Effect environment.
+Policies are registered from the current source position and skip historical
+view rebuilds. The contract form `policy(name, { from, on, uses? }, body)` is
+also supported and continues to receive `(envelope, context)`.
 
 `projection(name, { from, on, uses?, version?, batch?: { size } }, body)` receives
 arrays of envelopes, batched per source instance. Versions start at `1`.
@@ -157,6 +184,84 @@ by an `atLeast` read. A failed consumer stops that flush; calling it again retri
 the unacknowledged delivery. A command receipt reports the aggregate commit,
 not successful completion of every consumer. Avoid awaiting `flush()` from a
 consumer already executing inside that flush.
+
+## SQLite storage
+
+Import `sqlite` from `@marcelsud/accord/sqlite` and pass the returned store to
+`wire(Model, { storage, services })`. It uses Node.js 24's built-in SQLite
+driver and adds no npm runtime dependency. The core entry point does not import
+SQLite. `sqlite(filename)` opens or creates a file; `:memory:` is also supported
+but does not survive process termination.
+
+```ts
+import { wire } from "@marcelsud/accord";
+import { sqlite } from "@marcelsud/accord/sqlite";
+
+using storage = sqlite("app.sqlite");
+const bank = wire(Bank, { storage, services });
+const [, error] = await bank.flush();
+if (error !== null) throw error;
+```
+
+`Bank` and `services` are application declarations. Await operations before
+calling `storage.close()` or leaving its `using` scope. A close with pending
+operations is rejected. Construct/wire runtimes while their store is idle.
+
+The store persists aggregate snapshots, versions, immutable event envelopes,
+command-contract receipts, view rows and forwarded history, consumer
+registration, per-stream checkpoints, consistency watermarks, and explicit
+streams. Event IDs retain their sequences across restart. Empty policy
+registrations are durable too, so reopening does not skip events emitted after
+registration but before the first flush. New policies still start at the current
+position; existing policies resume their saved position.
+
+Each successful aggregate command commits its snapshot, events, and receipt in
+one transaction. A persistence or serialization failure rolls back that command.
+Domain values use Node's V8 serialization format rather than JSON, preserving
+values such as dates, maps, bigint, and undefined. Values must support both
+`structuredClone` and V8 serialization. Schema format version `1` is checked
+when opening a file; newer unsupported formats are rejected.
+
+The runtime wraps each consumer batch in a SQLite transaction. Projection
+adapters that use **the same `storage.database` connection** participate in that
+transaction. Return `ok()` only after all writes finish. Return `fail()` or throw
+to roll back the batch. Do not issue `BEGIN`, `COMMIT`, or `ROLLBACK` in such a
+handler; the runtime advances its checkpoint and commits both changes together.
+
+| Failure point | Recovery |
+| --- | --- |
+| After a command commits, before flush | The next process reads its stored events and delivers them. |
+| During a shared-connection projection write | SQLite rolls back the unfinished transaction; the batch stays pending. |
+| During checkpoint update or COMMIT | Projection changes and checkpoint both roll back. |
+| After the batch commits, before the process reports success | Its saved checkpoint prevents applying the committed batch again. |
+
+These guarantees cover committed SQL effects for the same model, consumer name,
+and version. A handler can execute again after a failed attempt. External HTTP
+calls, separate database connections (even to the same file), and other systems
+do not join the transaction; use stable event IDs and destination idempotency
+for those effects. Projections still lag until a successful flush. This is not
+an atomic transaction across all consumers.
+
+SQLite transactions use WAL mode and `synchronous=FULL`. Connections in this
+process serialize runtime operations per file; SQLite's writer lock prevents
+conflicting commits across processes. A conflicting process can receive an
+`Unexpected` busy error and should retry the operation. No stale state is cached
+between transactions. Keep handlers short because a handler holds the writer
+transaction while awaiting completion. A handler must not call another runtime
+operation on the same SQLite file; nested SQLite transactions are rejected. Watchers are
+local to their store connection; use reads/flush to observe other connections.
+
+Reopen with stable names and versions for normal recovery. Changing a projection
+version intentionally replays history: clear/migrate its destination or use a
+versioned destination before rebuilding counters. Changing a view version also
+creates a new forwarded history for downstream consumers. No automatic schema
+migration, event retention, or rebuild orchestration is supplied. SQLite-backed
+models containing workflows are rejected because durable workflows are not yet
+implemented.
+
+The runnable [`durable-bank.ts`](../examples/durable-bank.ts) demonstrates a
+counter projection across separate processes. The notification ledger adapter
+also accepts `openLedger(storage.database)` to share the runtime transaction.
 
 ## External adapters
 
@@ -299,10 +404,12 @@ const [value, error] = await story(Bank, async test => {
 
 ## Version 0.1 boundaries
 
-The runtime provides in-process atomic aggregate commits, keyed concurrency,
-receipts, replay, and consumer checkpoints. It does not provide process-crash
-durability, cross-process locks, deployment migration orchestration, retention,
-or distributed delivery guarantees. The memory store is unbounded.
+The default memory store provides in-process atomic aggregate commits, keyed
+concurrency, receipts, replay, and consumer checkpoints. The optional SQLite
+store adds restart recovery and database transactions for commands and consumer
+batches. It does not supply deployment migration orchestration, retention,
+distributed scheduling, or transactions across external systems. Both stores
+retain their histories without an automatic retention policy.
 
 Stored domain data must support `structuredClone`. HTTP data must additionally
 round-trip through JSON. Instance IDs and schema-backed domain values are

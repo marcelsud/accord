@@ -2,9 +2,10 @@ import { DatabaseSync } from "node:sqlite";
 import { fail, parse, trycatch, unexpected } from "@marcelsud/accord";
 import { LedgerRow } from "../domain.js";
 
-/** A real SQLite projection store; aggregate state and checkpoints still live in memory. */
-export function openLedger(filename = ":memory:") {
-  const database = new DatabaseSync(filename);
+/** Own a ledger connection, or join the durable runtime's transaction on a shared connection. */
+export function openLedger(filename: string | DatabaseSync = ":memory:") {
+  const ownsConnection = typeof filename === "string";
+  const database = ownsConnection ? new DatabaseSync(filename) : filename;
   const [, setupError] = trycatch(() =>
     database.exec(`
     CREATE TABLE IF NOT EXISTS ledger (
@@ -17,7 +18,7 @@ export function openLedger(filename = ":memory:") {
   `),
   );
   if (setupError !== null) {
-    database.close();
+    if (ownsConnection) database.close();
     throw setupError;
   }
   const upsert = database.prepare(`
@@ -35,8 +36,11 @@ export function openLedger(filename = ":memory:") {
 
   return {
     record(rows: readonly LedgerRow[]) {
-      const [, beginError] = trycatch(() => database.exec("BEGIN IMMEDIATE"));
-      if (beginError !== null) return fail(beginError);
+      const ownsTransaction = !database.isTransaction;
+      if (ownsTransaction) {
+        const [, beginError] = trycatch(() => database.exec("BEGIN IMMEDIATE"));
+        if (beginError !== null) return fail(beginError);
+      }
       const result = trycatch(() => {
         for (const row of rows)
           upsert.run(
@@ -46,9 +50,9 @@ export function openLedger(filename = ":memory:") {
             row.amount,
             row.balance,
           );
-        database.exec("COMMIT");
+        if (ownsTransaction) database.exec("COMMIT");
       });
-      if (result[1] !== null) {
+      if (result[1] !== null && ownsTransaction) {
         const [, rollbackError] = trycatch(() => database.exec("ROLLBACK"));
         if (rollbackError !== null)
           return fail(
@@ -66,7 +70,7 @@ export function openLedger(filename = ":memory:") {
       );
     },
     [Symbol.dispose]() {
-      database.close();
+      if (ownsConnection) database.close();
     },
   };
 }

@@ -7,10 +7,10 @@ what happened, and describe what should happen next through a small, explicit
 API. Business failures are plain tagged values. Operations return
 `[value, null]` or `[null, error]`. Effect is optional.
 
-This first version includes an **in-process runtime**. It is suitable for tests,
-prototypes, and exploring the API. Storage, delivery checkpoints, and workflow
-steps do not survive process termination. No npm release has been published from
-this repository yet.
+This first version includes an **in-process runtime** with a default memory
+store and optional SQLite persistence. The SQLite store recovers aggregate
+state, event history, views, and consumer checkpoints after restart. Workflow
+steps remain memory-only. No npm release has been published from this repository yet.
 
 ## Run the examples
 
@@ -44,6 +44,19 @@ They project account events into SQLite and send notifications through an
 external system contract. SQLite stores the derived ledger. Aggregate state and
 delivery checkpoints live in memory.
 [Notification walkthrough](examples/notifications/README.md)
+
+For a restart recovery example, commit a deposit in one process and drain its
+pending projection in another. Use a new filename for a fresh demonstration:
+
+```sh
+npm run example:durable -- /tmp/accord-runtime.sqlite deposit 100
+npm run example:durable -- /tmp/accord-runtime.sqlite drain
+npm run example:durable -- /tmp/accord-runtime.sqlite drain
+```
+
+Both drains print a projected total of `100`. The projection increments a
+counter; its SQL write and checkpoint commit together, so the second process
+does not count the deposit again. [Durable example](examples/durable-bank.ts)
 
 To consume a local build, run `npm pack` and install the generated
 `marcelsud-accord-0.1.0.tgz` in another project. Import the core from
@@ -246,7 +259,7 @@ requirements. See the [Effect bank example](examples/bank/with-effect.ts) and th
 | `aggregate(name, initialState, factory)` | Methods share a context and use one state shape for working and stored data |
 | `aggregate(name, contract, evolve)` | `(state, event) => state`; infers events from commands |
 | `view(name, { from, initial }, on(Event, handler), ...)` | Folds events into inferred state with optional routing and replay versions |
-| `policy(name, contract, body)` | `(envelope, ctx) => Result`; handles new events only |
+| `policy(name, { from, uses? }, on(Event, handler), ...)` | `(event, services, envelope) => Result`; handles new events only |
 | `projection(name, contract, body)` | `(batch, ctx) => Result`; replayable, idempotent writes |
 | `external(name, contract, body)` | `(input, ctx) => Result`; `.implement(services)` binds an adapter |
 | `workflow(name, contract, body)` | `(input, run) => Result`; checkpointed steps and compensation in memory |
@@ -269,9 +282,33 @@ the first delivery failure. Failed deliveries retain their checkpoint and retry
 on the next flush.
 No background scheduler or automatic backoff is provided.
 
+Policies receive the event payload first, declared services second, and the
+envelope third. Omit unused parameters. Use envelope metadata for source IDs,
+timestamps, and stable idempotency keys:
+
+```ts
+const NotifyDeposit = policy(
+  "NotifyDeposit",
+  { from: Account, uses: { notifications: Notifications } },
+  on(Deposited, (event, { notifications }, { id, source }) =>
+    notifications.send({
+      eventId: id,
+      accountId: source.id,
+      amount: event.amount,
+      balance: event.balance,
+    }),
+  ),
+);
+```
+
+This excerpt uses the notification example's domain contracts. Add more `on()`
+handlers to react to other events from the same source. Effect handlers use
+`on(Event, effectify(handler))`. The contract form
+`policy(name, { from, on, uses? }, body)` still receives `(envelope, context)`.
+
 Views and projections rebuild from history. Policies skip history, including
 events forwarded while rebuilding a view. Bump a view or projection's version
-when its calculation changes. View versions cannot decrease within a memory
+when its calculation changes. View versions cannot decrease within a
 store. Ordering is per source stream; there is no global ordering between
 sources. Projection writes and policy actions must tolerate repeated delivery.
 
@@ -284,6 +321,32 @@ Contract-based commands accept `commandId` and `expectedVersion` call options.
 The ID deduplicates successful commits per instance. Reusing it with a different
 command or input returns `CommandConflict`. A stale version returns `Conflict`.
 Class methods accept the arguments declared by the method after the instance ID.
+
+## Durable SQLite storage
+
+```ts
+import { wire } from "@marcelsud/accord";
+import { sqlite } from "@marcelsud/accord/sqlite";
+
+using storage = sqlite("app.sqlite");
+const bank = wire(Bank, { storage, services });
+
+// Await commands and flush before the storage is disposed.
+const [, error] = await bank.flush();
+if (error !== null) throw error;
+```
+
+The `Bank` model and its services come from your application. Reopen the same
+file and use the same model, consumer names, and versions to resume delivery.
+Calling `flush()` processes pending events; no background worker is started.
+
+For atomic projection effects, write through `storage.database` inside the
+projection handler. The runtime owns the transaction: the batch's SQL changes
+and checkpoint either commit together or roll back together. This supports
+counter updates without counting a committed batch twice. A separate connection,
+database, or external service is outside that transaction and needs idempotency.
+See the [storage reference](docs/runtime.md#sqlite-storage) for recovery,
+concurrency, and rebuild behavior.
 
 [Read the runtime and transport reference](docs/runtime.md) for workflows,
 external adapters, HTTP authorization, testing, and the limits of this release.

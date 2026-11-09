@@ -43,6 +43,11 @@ Both implementations register the `Account` class in `model()` and provide
 the ledger and notification services through `wire()`. The Effect version
 uses `effectify` and `Effect.gen` for its consumers.
 
+Both policies use `on(Deposited, handler)`. The handler receives the deposited
+event first, services second, and envelope metadata third. The Effect version
+wraps the handler with `effectify` and obtains its services through Effect keys.
+The envelope's stable event ID identifies a notification across retries.
+
 ```ts
 const [, openError] = await bank.account.open("a-1");
 if (openError !== null) throw openError;
@@ -130,7 +135,27 @@ deduplication, conflicting requests, cancellation, and SQL rollback.
 Enable the dummy system's failed-response mode with
 `startDummyNotifications({ failFirstAfterAccept: true })`.
 
-SQLite persists the **derived ledger only**. Aggregate state, event history,
-receipts, and delivery checkpoints remain in memory. Keeping the ledger does
-not restore an account or its pending deliveries after a restart. The dummy
+The default runner persists the **derived ledger only**. Its aggregate state,
+event history, receipts, and delivery checkpoints remain in memory. Keeping
+that runner's ledger alone does not restore an account after restart. The dummy
 notification system's deduplication map also lives in memory.
+
+For durable state and delivery, supply the SQLite runtime store. Use the same
+connection for the ledger so its writes commit with the projection checkpoint:
+
+```ts
+import { sqlite } from "@marcelsud/accord/sqlite";
+
+using storage = sqlite("bank.sqlite");
+using ledger = openLedger(storage.database);
+const { bank } = createBank(ledger, notifications, storage);
+const [, error] = await bank.flush();
+if (error !== null) throw error;
+```
+
+This excerpt uses `openLedger`, either `createBank`, and an application-supplied
+notification adapter. On a shared connection, `record()` joins the runtime's
+transaction and does not close the shared database when disposed. Reopen the
+same file to resume pending events. Notification sends remain external effects
+and require destination idempotency when a response is lost. See the
+[durable counter example](../durable-bank.ts) for a runnable restart demonstration.

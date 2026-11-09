@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Cause, Effect, Exit, Layer } from 'effect';
 import { effectify } from '../src/effect.js';
-import { aggregate, command, external, fail, wire, integer, match, model, ok, policy, service, string, view } from '../src/index.js';
+import { aggregate, command, external, fail, wire, integer, match, model, ok, on, policy, service, string, view } from '../src/index.js';
 import { Account, Balance, Cents, Deposited, NotOpen, Opened, State, open } from './fixtures.js';
 import { failure, success } from './helpers.js';
 import { Bank as BankModel, DepositRules } from '../examples/bank/domain.js';
@@ -127,6 +127,39 @@ test('Effect-backed policies receive uses as their environment', async () => {
   success(await bank.account.deposit('a', { amount: 100 }));
   success(await bank.flush());
   assert.deepEqual(seen, [50]);
+});
+
+test('Effect on() policies receive payloads, services, metadata, and finalize each retry', async () => {
+  const attempts: string[] = [];
+  const seen: number[] = [];
+  let finalized = 0;
+  const reaction = policy('EffectPayloadPolicy', { from: Account, uses: { rules: Rules } },
+    on(Opened, event => { assert.equal(event._tag, 'Opened'); return ok(undefined); }),
+    on(Deposited, effectify((event, services, envelope) => Effect.ensuring(
+      Effect.gen(function* () {
+        const rules = yield* effectify(Rules);
+        assert.equal(rules, services.rules);
+        assert.equal(services.idempotencyKey, envelope.id);
+        assert.equal(event, envelope.event);
+        attempts.push(envelope.id);
+        if (attempts.length === 1) return yield* Effect.fail(NotOpen());
+        seen.push(Math.min(event.amount, rules.maximum));
+        return undefined;
+      }),
+      Effect.sync(() => { finalized++; }),
+    ))),
+  );
+  const bank = wire(model('EffectPayloadBank', { aggregates: { account: Account }, policies: [reaction] }), {
+    services: { rules: { maximum: 50 } },
+  });
+  success(await bank.account.open('a', {}));
+  const receipt = success(await bank.account.deposit('a', { amount: 100 }));
+  assert.equal(failure(await bank.flush())._tag, 'NotOpen');
+  success(await bank.flush());
+  success(await bank.flush());
+  assert.deepEqual(attempts, [receipt.events[0]!.id, receipt.events[0]!.id]);
+  assert.deepEqual(seen, [50]);
+  assert.equal(finalized, 2);
 });
 
 test('effectified models resolve layers and run factory methods lazily through yield*', async () => {

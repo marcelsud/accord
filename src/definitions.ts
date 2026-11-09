@@ -321,11 +321,20 @@ export interface View<N extends string, S, From extends Source, E extends Tagged
 }
 export type AnyView = View<string, any, any, any>;
 export interface ViewHandler<S, F extends AnyEvent> {
+  /** Selects the contextual on() signature; no runtime marker is needed. */
+  readonly handlerKind?: 'view';
   readonly event: F;
   readonly evolve: (state: S, event: ReturnType<F>, envelope: Envelope<ReturnType<F>>) => S;
 }
-export function on<S, F extends AnyEvent>(event: F, evolve: ViewHandler<NoInfer<S>, NoInfer<F>>['evolve']): ViewHandler<S, F> {
-  return { event, evolve };
+type OnBody<K extends 'view' | 'policy', S, F extends AnyEvent, U extends Uses> = K extends 'view'
+  ? ViewHandler<S, F>['evolve'] : PolicyBody<ReturnType<F>, U>;
+export function on<F extends AnyEvent, K extends 'view' | 'policy' = 'policy', S = unknown, U extends Uses = {}>(
+  event: F, handler: OnBody<NoInfer<K>, NoInfer<S>, NoInfer<F>, NoInfer<U>>,
+): {
+  readonly handlerKind?: K; readonly event: F;
+  readonly evolve: OnBody<K, S, F, U>; readonly handle: OnBody<K, S, F, U>;
+} {
+  return { event, evolve: handler, handle: handler };
 }
 type ViewOptions<F extends Source, S extends object, E extends Tagged, Validation extends SchemaInput> = {
   readonly from: F; readonly initial: S; readonly version?: number;
@@ -417,9 +426,60 @@ export interface ConsumerContract<F extends Source, On extends readonly AnyEvent
   readonly from: F; readonly on: On & readonly Schema<SourceEvent<F>>[]; readonly uses?: U;
   readonly version?: number; readonly batch?: { readonly size: number };
 }
+export type PolicyBody<E extends Tagged, U extends Uses> =
+  | ((event: E, services: ContextOf<U>, envelope: Envelope<E>) => MaybePromise<Result<unknown, Tagged>>)
+  | AdaptedBody<[event: E, services: ContextOf<U>, envelope: Envelope<E>], unknown, Tagged, Requirements<U>>;
+export interface PolicyHandler<F extends AnyEvent, U extends Uses> {
+  readonly handlerKind?: 'policy';
+  readonly event: F;
+  readonly handle: PolicyBody<ReturnType<F>, U>;
+}
+type PolicyOptions<F extends Source, U extends Uses> = {
+  readonly from: F; readonly uses?: U; readonly version?: number;
+};
+type SourcePolicyHandler<F extends Source, U extends Uses, T extends string> = PolicyHandler<any, NoInfer<U>> & {
+  readonly event: AnyEvent & Schema<SourceEvent<NoInfer<F>>> & { readonly name: T };
+};
+export function policy<
+  const N extends string, const F extends Source, const E extends AnyEvent & Schema<SourceEvent<NoInfer<F>>>, const U extends Uses = {},
+>(
+  name: N, options: PolicyOptions<F, U>, handler: PolicyHandler<NoInfer<E>, NoInfer<U>> & { readonly event: E },
+): Consumer<N, 'policy', ReturnType<E>, U>;
+export function policy<const N extends string, const F extends Source, const T extends string, const U extends Uses = {}>(
+  name: N, options: PolicyOptions<F, U>,
+  ...handlers: [SourcePolicyHandler<F, U, T>, ...SourcePolicyHandler<F, U, T>[]]
+): Consumer<N, 'policy', SourceEventsWithTags<F, T>, U>;
 export function policy<const N extends string, const F extends Source, const On extends readonly AnyEvent[], const U extends Uses = {}, E extends Tagged = Tagged>(
   name: N, contract: ConsumerContract<F, On, U>, body: Body<[Envelope<Values<On>>], U, unknown, E>,
-): Consumer<N, 'policy', Values<On>, U> { return consumer('policy', name, contract, body) as Consumer<N, 'policy', Values<On>, U>; }
+): Consumer<N, 'policy', Values<On>, U>;
+export function policy(name: string, options: any, ...handlers: any[]): AnyConsumer {
+  if ('on' in options) {
+    if (handlers.length !== 1 || handlers[0]?.handle) throw new TypeError('Use either a policy contract body or on() handlers');
+    return consumer('policy', name, options, handlers[0]);
+  }
+  if (handlers.length === 0) throw new TypeError('A policy requires at least one event handler');
+  const uses = options.uses ?? {};
+  const byTag = new Map<string, { event: AnyEvent; execute: (...args: any[]) => any; adapted: boolean }>();
+  for (const handler of handlers) {
+    const body = handler?.handle;
+    if (handler?.event?.kind !== 'event' || !(typeof body === 'function' || body?.[EffectBody] === true && typeof body.bind === 'function')) {
+      throw new TypeError('Expected an on() policy handler');
+    }
+    const tag = handler.event.name;
+    if (byTag.has(tag)) throw new TypeError(`Duplicate policy handler: ${tag}`);
+    byTag.set(tag, { event: handler.event, execute: bindBody(body, uses), adapted: typeof body !== 'function' });
+  }
+  return consumer('policy', name, { ...options, on: [...byTag.values()].map(handler => handler.event) },
+    (envelope: Envelope, context: ContextOf<any>) => {
+      const handler = byTag.get(envelope.event._tag);
+      if (!handler) throw new TypeError(`Missing policy handler: ${envelope.event._tag}`);
+      // Adapted bodies receive execution context last for binding and cancellation.
+      return handler.adapted
+        ? handler.execute(envelope.event, context, envelope, context)
+        : handler.execute(envelope.event, context, envelope);
+    },
+  );
+}
 export function projection<const N extends string, const F extends Source, const On extends readonly AnyEvent[], const U extends Uses = {}, E extends Tagged = Tagged>(
   name: N, contract: ConsumerContract<F, On, U>, body: Body<[readonly Envelope<Values<On>>[]], U, unknown, E>,
 ): Consumer<N, 'projection', Values<On>, U> { return consumer('projection', name, contract, body) as Consumer<N, 'projection', Values<On>, U>; }

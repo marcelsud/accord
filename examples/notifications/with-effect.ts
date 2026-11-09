@@ -1,6 +1,14 @@
 import { Effect } from "effect";
 import { effectify } from "@marcelsud/accord/effect";
-import { wire, memory, model, policy, projection } from "@marcelsud/accord";
+import {
+  wire,
+  memory,
+  model,
+  on,
+  policy,
+  projection,
+  type RuntimeStore,
+} from "@marcelsud/accord";
 import {
   Account,
   Deposited,
@@ -30,24 +38,27 @@ const LedgerProjection = projection(
 );
 const NotifyDeposit = policy(
   "NotifyDeposit",
-  { from: Account, on: [Deposited], uses: { notifications: Notifications } },
-  effectify((envelope) =>
-    Effect.gen(function* () {
-      const notifications = yield* effectify(Notifications);
-      const [, error] = yield* Effect.promise((signal) =>
-        notifications.send(
-          {
-            eventId: envelope.id,
-            accountId: envelope.source.id,
-            amount: envelope.event.amount,
-            balance: envelope.event.balance,
-          },
-          { signal },
-        ),
-      );
-      if (error !== null) return yield* Effect.fail(error);
-      return undefined;
-    }),
+  { from: Account, uses: { notifications: Notifications } },
+  on(
+    Deposited,
+    effectify((event, _services, { id, source }) =>
+      Effect.gen(function* () {
+        const notifications = yield* effectify(Notifications);
+        const [, error] = yield* Effect.promise((signal) =>
+          notifications.send(
+            {
+              eventId: id,
+              accountId: source.id,
+              amount: event.amount,
+              balance: event.balance,
+            },
+            { signal },
+          ),
+        );
+        if (error !== null) return yield* Effect.fail(error);
+        return undefined;
+      }),
+    ),
   ),
 );
 const Bank = model("Bank", {
@@ -58,7 +69,7 @@ const Bank = model("Bank", {
 export function createBank(
   ledger: LedgerPort,
   notifications: NotificationPort,
-  storage = memory(),
+  storage: RuntimeStore = memory(),
 ) {
   const bank = wire(Bank, { storage, services: { ledger, notifications } });
   return { bank, projection: LedgerProjection };

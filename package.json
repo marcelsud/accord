@@ -25,6 +25,10 @@
     "./effect": {
       "types": "./dist/effect.d.ts",
       "import": "./dist/effect.js"
+    },
+    "./sqlite": {
+      "types": "./dist/sqlite.d.ts",
+      "import": "./dist/sqlite.js"
     }
   },
   "scripts": {
@@ -36,6 +40,7 @@
     "prepack": "npm run build",
     "example:sqlite": "node .test-build/examples/notifications/run.js pure",
     "example:sqlite:effect": "node .test-build/examples/notifications/run.js effect",
+    "example:durable": "node .test-build/examples/durable-bank.js",
     "example:effect": "node .test-build/examples/bank/with-effect.js",
     "format:examples": "prettier --write examples",
     "format:examples:check": "prettier --check examples"

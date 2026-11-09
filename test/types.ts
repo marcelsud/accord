@@ -1,7 +1,8 @@
 import { Effect, Layer } from 'effect';
 import { effectify } from '../src/effect.js';
+import { sqlite } from '@marcelsud/accord/sqlite';
 import {
-  aggregate, command, event, external, fail, wire, integer, match, model, ok, on, rejection, service, string, view, vo,
+  aggregate, command, event, external, fail, wire, integer, match, model, ok, on, policy, rejection, service, string, view, vo,
   type Infer, type ReplyOf, type Requirement, type Result, type SourceEvent,
 } from '../src/index.js';
 import { Account, AlreadyOpen, Balance, Bank, Cents, Deposited, InsufficientFunds, NotOpen, Opened, State, deposit } from './fixtures.js';
@@ -144,6 +145,84 @@ async function viewHandlerInference() {
 
 const Rules = service('Rules', { maximum: integer });
 const Other = service('Other', { label: string });
+function sqliteInference() {
+  using storage = sqlite(':memory:');
+  wire(Bank, { storage });
+  storage.database.prepare('SELECT 1').get();
+  // @ts-expect-error SQLite filenames must be strings.
+  sqlite(123);
+}
+function policyHandlerInference() {
+  const reaction = policy(
+    'TypedPolicy', { from: Account, uses: { rules: Rules } },
+    on(Opened, (event, services, envelope) => {
+      type Event = Expect<Equal<typeof event, ReturnType<typeof Opened>>>;
+      type Metadata = Expect<Equal<typeof envelope.event, typeof event>>;
+      type Service = Expect<Equal<typeof services.rules.maximum, number>>;
+      // @ts-expect-error The payload contains business data, not envelope fields.
+      event.source;
+      // @ts-expect-error Services must be declared in uses.
+      services.other;
+      return ok(undefined);
+    }),
+    on(Deposited, (event, { rules }, envelope) => {
+      type Event = Expect<Equal<typeof event, ReturnType<typeof Deposited>>>;
+      type Metadata = Expect<Equal<typeof envelope.event, typeof event>>;
+      type Service = Expect<Equal<typeof rules.maximum, number>>;
+      return ok(event.amount);
+    }),
+  );
+  const PolicyBank = model('TypedPolicyBank', { aggregates: { account: Account }, policies: [reaction] });
+  // @ts-expect-error Dependencies used by on() policies must be provided to wire().
+  wire(PolicyBank);
+  wire(PolicyBank, { services: { rules: { maximum: 100 } } });
+  // @ts-expect-error Policy dependency implementations retain their types.
+  wire(PolicyBank, { services: { rules: { maximum: 'wrong' } } });
+  policy('SinglePolicy', { from: Account }, on(Deposited, (event, services, envelope) => {
+    type Event = Expect<Equal<typeof event, ReturnType<typeof Deposited>>>;
+    type Metadata = Expect<Equal<typeof envelope.event, typeof event>>;
+    // @ts-expect-error Policies without uses do not receive undeclared services.
+    services.rules;
+    return ok(event.amount);
+  }));
+  const standalone = on(Deposited, event => {
+    type Event = Expect<Equal<typeof event, ReturnType<typeof Deposited>>>;
+    return ok(event.amount);
+  });
+  policy('StandalonePolicy', { from: Account }, standalone);
+  // @ts-expect-error A policy requires at least one handler.
+  policy('EmptyPolicy', { from: Account });
+  // @ts-expect-error Events must belong to the declared source.
+  policy('UnknownPolicyEvent', { from: Account }, on(event('Unrelated'), () => ok(undefined)));
+  // @ts-expect-error Handlers must return a Result.
+  policy('BadPolicyResult', { from: Account }, on(Deposited, () => 1));
+  // @ts-expect-error Event declarations cannot be rejections.
+  policy('RejectionPolicy', { from: Account }, on(NotOpen, () => ok(undefined)));
+  const Factory = aggregate('PolicyFactory', {}, ({ emit }) => ({
+    deposit(amount: number) { emit(Deposited({ amount })); return ok(undefined); },
+  }));
+  policy('FactoryPolicy', { from: Factory }, on(Deposited, (event, _services, envelope) => {
+    type Event = Expect<Equal<typeof event, ReturnType<typeof Deposited>>>;
+    type Metadata = Expect<Equal<typeof envelope.event, typeof event>>;
+    return ok(event.amount);
+  }));
+  policy('EffectPolicy', { from: Account, uses: { rules: Rules } },
+    on(Deposited, effectify((event, services, envelope) => Effect.gen(function* () {
+      type Event = Expect<Equal<typeof event, ReturnType<typeof Deposited>>>;
+      type Metadata = Expect<Equal<typeof envelope.event, typeof event>>;
+      type Service = Expect<Equal<typeof services.rules.maximum, number>>;
+      const rules = yield* effectify(Rules);
+      return Math.min(event.amount, rules.maximum);
+    }))),
+  );
+  policy('WrongEffectPolicy', { from: Account, uses: { rules: Rules } },
+    // @ts-expect-error Effect requirements must match the policy's declared dependencies.
+    on(Deposited, effectify(() => Effect.gen(function* () {
+      yield* effectify(Other);
+      return undefined;
+    }))),
+  );
+}
 const Labelled = event('Labelled', { label: string });
 // Plain declarations preserve inference without `as const` or explicit generics.
 const AccountContract = {

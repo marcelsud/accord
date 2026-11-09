@@ -21,6 +21,9 @@
       ],
       "@marcelsud/accord/effect": [
         "./src/effect.ts"
+      ],
+      "@marcelsud/accord/sqlite": [
+        "./src/sqlite.ts"
       ]
     }
   },
