@@ -58,6 +58,12 @@ Both drains print a projected total of `100`. The projection increments a
 counter; its SQL write and checkpoint commit together, so the second process
 does not count the deposit again. [Durable example](examples/durable-bank.ts)
 
+The [CRM walkthrough](examples/crm/README.md) combines companies, contacts,
+deals, policies, a durable pipeline, and application-owned migrations. Its
+versioned modules export the same event names with distinct persisted tags:
+`V1.DealChanged` has tag `DealChanged`, and `V2.DealChanged` has tag
+`DealChangedV2`.
+
 To consume a local build, run `npm pack` and install the generated
 `marcelsud-accord-0.1.0.tgz` in another project. Import the core from
 `@marcelsud/accord`; install `effect@^4.1.2` only when importing

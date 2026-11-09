@@ -41,6 +41,8 @@
     "example:sqlite": "node .test-build/examples/notifications/run.js pure",
     "example:sqlite:effect": "node .test-build/examples/notifications/run.js effect",
     "example:durable": "node .test-build/examples/durable-bank.js",
+    "example:crm": "node .test-build/examples/crm/v1.js",
+    "example:crm:migrations": "node .test-build/examples/crm/migrations.js",
     "example:effect": "node .test-build/examples/bank/with-effect.js",
     "format:examples": "prettier --write examples",
     "format:examples:check": "prettier --check examples"
