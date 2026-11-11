@@ -30,7 +30,6 @@ jobs:
             package-lock.json
             website/package-lock.json
       - run: npm ci --ignore-scripts
-      - run: npm run build
       - working-directory: website
         run: npm ci
       - run: npx tsc -p website/tsconfig.snippets.json --noEmit
