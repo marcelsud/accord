@@ -2,6 +2,8 @@
 
 **Composable domain modeling**, simplifying DDD for the rest of us.
 
+[Documentation](https://accord-docs-aqu.pages.dev)
+
 `@marcelsud/accord` keeps domain modeling simple. Define business rules, record
 what happened, and describe what should happen next through a small, explicit
 API. Business failures are plain tagged values. Operations return
