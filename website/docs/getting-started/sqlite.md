@@ -2,7 +2,7 @@
 
 The default store lives in memory. Swap in SQLite to recover state, event history, views, and consumer checkpoints after a restart.
 
-It uses Node.js 24's built-in `node:sqlite` driver. No extra npm dependency.
+It uses Node.js 24's built-in `node:sqlite` driver. No extra npm dependency. These imports are from `@marcelsud/accord@0.1.0`, the current release.
 
 ## Usage
 

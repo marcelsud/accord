@@ -14,19 +14,19 @@ Install `@marcelsud/accord` version **0.1.0**. You need Node.js **24** or newer.
 ::: code-group
 
 ```sh [npm]
-npm install @marcelsud/accord
+npm install @marcelsud/accord@0.1.0
 ```
 
 ```sh [yarn]
-yarn add @marcelsud/accord
+yarn add @marcelsud/accord@0.1.0
 ```
 
 ```sh [pnpm]
-pnpm add @marcelsud/accord
+pnpm add @marcelsud/accord@0.1.0
 ```
 
 ```sh [bun]
-bun add @marcelsud/accord
+bun add @marcelsud/accord@0.1.0
 ```
 
 :::
