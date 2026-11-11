@@ -15,7 +15,7 @@ import {
   view,
   vo,
   type Infer,
-} from "@marcelsud/accord";
+} from "../../src/index.js";
 
 const StatusSchema = union(
   literal("PENDING"),

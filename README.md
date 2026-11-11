@@ -14,60 +14,9 @@ steps remain memory-only. No npm release has been published from this repository
 
 ## Run the examples
 
-Use Node.js 24 or newer. The checks compile the examples and exercise the
-notification adapter against a local loopback server.
+Runnable examples live in the [accord-examples repository](https://github.com/marcelsud/accord-examples). They require Node.js 24 or newer and will install `@marcelsud/accord` from npm after version 0.1.0 is published.
 
-```sh
-git clone https://github.com/marcelsud/accord.git
-cd accord
-npm ci --ignore-scripts
-npm run check
-npm run example
-npm run example:effect
-```
-
-The native bank example shows flat account state and nested savings state. It
-seeds a standalone savings account from the stored state and previews a balance
-of 150. The Effect example provides deposit rules through a layer and prints
-`{ balance: 100 }`.
-[Bank walkthrough](examples/bank/README.md)
-
-For a complete integration example, run both versions with a SQLite ledger and
-an external notification system after `npm run check`:
-
-```sh
-npm run example:sqlite
-npm run example:sqlite:effect
-```
-
-They project account events into SQLite and send notifications through an
-external system contract. SQLite stores the derived ledger. Aggregate state and
-delivery checkpoints live in memory.
-[Notification walkthrough](examples/notifications/README.md)
-
-For a restart recovery example, commit a deposit in one process and drain its
-pending projection in another. Use a new filename for a fresh demonstration:
-
-```sh
-npm run example:durable -- /tmp/accord-runtime.sqlite deposit 100
-npm run example:durable -- /tmp/accord-runtime.sqlite drain
-npm run example:durable -- /tmp/accord-runtime.sqlite drain
-```
-
-Both drains print a projected total of `100`. The projection increments a
-counter; its SQL write and checkpoint commit together, so the second process
-does not count the deposit again. [Durable example](examples/durable-bank.ts)
-
-The [CRM walkthrough](examples/crm/README.md) combines companies, contacts,
-deals, policies, a durable pipeline, and application-owned migrations. Its
-versioned modules export the same event names with distinct persisted tags:
-`V1.DealChanged` has tag `DealChanged`, and `V2.DealChanged` has tag
-`DealChangedV2`.
-
-To consume a local build, run `npm pack` and install the generated
-`marcelsud-accord-0.1.0.tgz` in another project. Import the core from
-`@marcelsud/accord`; install `effect@^4.1.2` only when importing
-`@marcelsud/accord/effect`.
+To consume a local build, run `npm pack` and install the generated `marcelsud-accord-0.1.0.tgz` in another project. Import the core from `@marcelsud/accord`; install `effect@^4.1.2` only when importing `@marcelsud/accord/effect`.
 
 ## Define business rules
 
@@ -162,7 +111,7 @@ balance.snapshot((cents) => ({ cents })); // { cents: 150 }
 ```
 
 The bank uses `Balance` for arithmetic inside its methods and stores cents
-in aggregate state. [Bank domain](examples/bank/domain.ts)
+in aggregate state. [Bank domain](https://github.com/marcelsud/accord-examples/blob/main/bank/domain.ts)
 
 ## Check tuples before using values
 
@@ -254,8 +203,8 @@ const summary = await Effect.runPromise(Effect.provide(program, BankLive));
 Use `effectify(Dependency)` to get a stable Effect service key. Use
 `effectify(body)` for policies, projections, workflows, external adapters, and
 commands defined with `command()`. Their `uses` declaration checks the Effect
-requirements. See the [Effect bank example](examples/bank/with-effect.ts) and the
-[Effect notification example](examples/notifications/with-effect.ts).
+requirements. See the [Effect bank example](https://github.com/marcelsud/accord-examples/blob/main/bank/with-effect.ts) and the
+[Effect notification example](https://github.com/marcelsud/accord-examples/blob/main/notifications/with-effect.ts).
 
 ## Build the rest of the model
 
@@ -360,11 +309,10 @@ external adapters, HTTP authorization, testing, and the limits of this release.
 ## Develop
 
 ```sh
-npm run format:examples  # Format all examples with Prettier
 npm run typecheck  # Positive assertions and @ts-expect-error inference tests
 npm test           # Build, compile tests, and run Node's built-in test runner
 npm run build      # ESM and declaration files in dist/
-npm run check      # All of the above
+npm run check      # Typecheck and tests
 ```
 
 No runtime dependencies are installed for the core. Effect is an optional peer.

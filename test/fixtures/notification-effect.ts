@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { effectify } from "@marcelsud/accord/effect";
+import { effectify } from "../../src/effect.js";
 import {
   wire,
   memory,
@@ -8,7 +8,7 @@ import {
   policy,
   projection,
   type RuntimeStore,
-} from "@marcelsud/accord";
+} from "../../src/index.js";
 import {
   Account,
   Deposited,
@@ -17,7 +17,7 @@ import {
   ledgerRows,
   type LedgerPort,
   type NotificationPort,
-} from "./domain.js";
+} from "./notification-domain.js";
 
 const LedgerProjection = projection(
   "Ledger",

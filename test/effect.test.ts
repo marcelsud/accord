@@ -5,7 +5,7 @@ import { effectify } from '../src/effect.js';
 import { aggregate, command, external, fail, wire, integer, match, model, ok, on, policy, service, string, view } from '../src/index.js';
 import { Account, Balance, Cents, Deposited, NotOpen, Opened, State, open } from './fixtures.js';
 import { failure, success } from './helpers.js';
-import { Bank as BankModel, DepositRules } from '../examples/bank/domain.js';
+import { Bank as BankModel, DepositRules } from './fixtures/bank-domain.js';
 
 const Rules = service('DepositRules', { maximum: integer });
 const RulesKey = effectify(Rules);

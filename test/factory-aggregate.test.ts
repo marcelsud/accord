@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { aggregate, event, fail, integer, memory, model, ok, rejection, wire } from '../src/index.js';
-import { Account, Bank } from '../examples/bank/domain.js';
+import { Account, Bank } from './fixtures/bank-domain.js';
 import { failure, success } from './helpers.js';
 
 test('factory aggregates share one state shape across stored and standalone calls', async () => {

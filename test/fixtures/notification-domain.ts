@@ -14,7 +14,7 @@ import {
   type InvalidInput,
   type Result,
   type Unexpected,
-} from "@marcelsud/accord";
+} from "../../src/index.js";
 
 export const Cents = refine(integer, (value) => value > 0, "positive cents");
 export const Opened = event("Opened");
