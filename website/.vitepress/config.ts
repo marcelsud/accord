@@ -14,8 +14,8 @@ const repo = 'https://github.com/marcelsud/accord'
 /**
  * Where the runnable examples live. Links written as `[text](examples:bank/domain.ts)`
  * are rewritten to `${EXAMPLES_BASE}/bank/domain.ts` at build time.
- * Change this one value (or set ACCORD_EXAMPLES_BASE) to point the docs elsewhere, e.g.
- * 'https://github.com/marcelsud/accord/tree/main/examples' for the in-repo copy.
+ * Change this one value (or set ACCORD_EXAMPLES_BASE) to point the docs at another checkout.
+ * Paths are relative to the accord-examples repository root, such as `bank/domain.ts`.
  */
 const EXAMPLES_BASE =
   process.env.ACCORD_EXAMPLES_BASE ??

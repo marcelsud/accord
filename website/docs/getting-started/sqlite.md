@@ -33,12 +33,12 @@ Await every operation before closing. Closing with pending operations is rejecte
 
 ## Try the restart demo
 
-From the Accord repository, after `npm run check`:
+From the [accord-examples](examples:) repository, after `npm ci` and `npm run build`:
 
 ```sh
-npm run example:durable -- /tmp/accord-runtime.sqlite deposit 100
-npm run example:durable -- /tmp/accord-runtime.sqlite drain
-npm run example:durable -- /tmp/accord-runtime.sqlite drain
+npm run durable -- /tmp/accord-runtime.sqlite deposit 100
+npm run durable -- /tmp/accord-runtime.sqlite drain
+npm run durable -- /tmp/accord-runtime.sqlite drain
 ```
 
 The first process commits a deposit and exits without flushing. The next process delivers it. Both drains print a projected total of `100`: the projection's SQL write and its checkpoint commit together, so the second drain doesn't count the deposit again.

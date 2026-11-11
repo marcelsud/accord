@@ -16,7 +16,7 @@ npm run check
 | `npm run typecheck` | Positive assertions and `@ts-expect-error` inference tests |
 | `npm test` | Build, compile tests, and run Node's built-in test runner |
 | `npm run build` | ESM and declaration files in `dist/` |
-| `npm run check` | Format check, typecheck, and tests |
+| `npm run check` | Typecheck and tests |
 
 ## Docs
 

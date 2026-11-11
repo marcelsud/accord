@@ -9,33 +9,24 @@ Using Accord is easy. Let's build a tiny bank: one aggregate, one event, one rej
 
 ## Install
 
-Accord isn't published to npm yet. Build a tarball from the repository:
-
-```sh
-git clone https://github.com/marcelsud/accord.git
-cd accord
-npm ci --ignore-scripts
-npm pack # creates marcelsud-accord-0.1.0.tgz
-```
-
-Then install it in your project:
+Install `@marcelsud/accord` version **0.1.0**. You need Node.js **24** or newer.
 
 ::: code-group
 
 ```sh [npm]
-npm install ../accord/marcelsud-accord-0.1.0.tgz
+npm install @marcelsud/accord
 ```
 
 ```sh [yarn]
-yarn add ../accord/marcelsud-accord-0.1.0.tgz
+yarn add @marcelsud/accord
 ```
 
 ```sh [pnpm]
-pnpm add ../accord/marcelsud-accord-0.1.0.tgz
+pnpm add @marcelsud/accord
 ```
 
 ```sh [bun]
-bun add ../accord/marcelsud-accord-0.1.0.tgz
+bun add @marcelsud/accord
 ```
 
 :::

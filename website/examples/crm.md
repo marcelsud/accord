@@ -6,6 +6,8 @@ Source: [`crm/`](examples:crm)
 
 ## Run v1
 
+From the [accord-examples](examples:) repository, after `npm ci` and `npm run build`:
+
 ```sh
 npm run crm -- /tmp/accord-crm.sqlite seed
 npm run crm -- /tmp/accord-crm.sqlite drain

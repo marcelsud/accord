@@ -2,7 +2,7 @@
 
 ## Is Accord on npm?
 
-Not yet. Run `npm pack` in the repository and install the tarball. See [Getting Started](/docs/getting-started/basic).
+Yes. `@marcelsud/accord@0.1.0` is the current release. You need Node.js 24 or newer. See [Getting Started](/docs/getting-started/basic).
 
 ## Do I need Effect?
 
