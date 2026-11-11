@@ -43,6 +43,7 @@ jobs:
           name: vitepress-dist
           path: website/.vitepress/dist
           if-no-files-found: error
+          retention-days: 1
   deploy:
     needs: build
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
@@ -52,7 +53,6 @@ jobs:
       contents: read
       deployments: write
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
@@ -60,14 +60,22 @@ jobs:
         with:
           name: vitepress-dist
           path: website/.vitepress/dist
-      - id: deploy
-        uses: cloudflare/wrangler-action@2ef9f398b9175c68f953e40d679493850d640a85 # v4.1.3
+      - id: pages-branch
         env:
           PAGES_BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: |
+          if [[ ! "$PAGES_BRANCH" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+            echo "::error::Invalid PAGES_BRANCH"
+            exit 1
+          fi
+          echo "branch=${PAGES_BRANCH}" >> "$GITHUB_OUTPUT"
+      - id: deploy
+        uses: cloudflare/wrangler-action@953926a2e2182532811c01a25e53647d93bf07c0 # v4.1.3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy website/.vitepress/dist --project-name=accord-docs --branch=${{ env.PAGES_BRANCH }}
+          wranglerVersion: "4.160.1"
+          command: pages deploy website/.vitepress/dist --project-name=accord-docs --branch=${{ steps.pages-branch.outputs.branch }}
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
       - if: steps.deploy.outcome == 'success'
         env:
