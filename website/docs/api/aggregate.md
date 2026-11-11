@@ -166,7 +166,7 @@ You can also declare the aggregate contract once as `{ state, commands }` and im
 ```ts
 const bank = wire(model('Bank', { aggregates: { account: Account } }))
 
-const [receipt, error] = await bank.account.deposit('a-1', 100)
+const [receipt, error] = await bank.account.deposit('a-1', { amount: 100 })
 const [state] = await bank.account.get('a-1')
 const [envelopes] = await bank.account.events('a-1', { after: 0 })
 ```
