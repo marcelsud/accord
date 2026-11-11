@@ -1,7 +1,7 @@
 # Runtime and transport reference
 
 All examples are excerpts. The factory bank is defined in
-[`examples/bank/domain.ts`](../examples/bank/domain.ts). The HTTP and history
+[`examples/bank/domain.ts`](https://github.com/marcelsud/accord-examples/blob/main/bank/domain.ts). The HTTP and history
 examples below use an event-evolved bank with explicitly declared commands.
 
 ## Class aggregates
@@ -75,7 +75,7 @@ const Account = aggregate(
 The deposit method constructs a `Balance` for the calculation and writes
 the resulting cents back to state. The savings aggregate uses the same value
 object with a nested `{ balance: { cents } }` state shape.
-[Bank domain](../examples/bank/domain.ts)
+[Bank domain](https://github.com/marcelsud/accord-examples/blob/main/bank/domain.ts)
 
 `wire()` resolves methods lazily. Each call restores an isolated instance and
 runs the factory once, then looks up the requested method. A missing method
@@ -259,7 +259,7 @@ migration, event retention, or rebuild orchestration is supplied. SQLite-backed
 models containing workflows are rejected because durable workflows are not yet
 implemented.
 
-The runnable [`durable-bank.ts`](../examples/durable-bank.ts) demonstrates a
+The runnable [`durable-bank.ts`](https://github.com/marcelsud/accord-examples/blob/main/durable-bank/index.ts) demonstrates a
 counter projection across separate processes. The notification ledger adapter
 also accepts `openLedger(storage.database)` to share the runtime transaction.
 
@@ -413,7 +413,7 @@ retain their histories without an automatic retention policy.
 
 Stored domain data must support `structuredClone`. HTTP data must additionally
 round-trip through JSON. Instance IDs and schema-backed domain values are
-strings, numbers, booleans, arrays, and records in the bundled examples.
+strings, numbers, booleans, arrays, and records in the separate examples repository.
 
 Effect support targets v4.1.2 or newer in the v4 line.
 `effectify(BankModel, "Bank")` returns a named Effect service key with a
@@ -432,4 +432,4 @@ while waiting on a native call may still see that call finish in the runtime.
 
 The adapter also lifts dependencies, standalone commands, and Effect-returning
 handlers. Native dependency shapes retain their tuple results when called from
-inside a generator. [Effect bank example](../examples/bank/with-effect.ts)
+inside a generator. [Effect bank example](https://github.com/marcelsud/accord-examples/blob/main/bank/with-effect.ts)

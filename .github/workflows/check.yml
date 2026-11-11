@@ -13,8 +13,4 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - run: npm run check
-      - run: npm run example
-      - run: npm run example:effect
-      - run: npm run example:sqlite
-      - run: npm run example:sqlite:effect
       - run: npm pack --dry-run

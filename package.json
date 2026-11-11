@@ -14,7 +14,6 @@
   "files": [
     "dist",
     "docs",
-    "examples",
     "README.md"
   ],
   "exports": {
@@ -35,17 +34,9 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "npm run build && node --input-type=module -e \"import { rmSync } from 'node:fs'; rmSync('.test-build', { recursive: true, force: true });\" && tsc -p tsconfig.test.json && node --test --test-isolation=none .test-build/test/*.test.js",
-    "check": "npm run format:examples:check && npm run typecheck && npm test",
-    "example": "node .test-build/examples/bank/pure.js",
+    "check": "npm run typecheck && npm test",
     "prepack": "npm run build",
-    "example:sqlite": "node .test-build/examples/notifications/run.js pure",
-    "example:sqlite:effect": "node .test-build/examples/notifications/run.js effect",
-    "example:durable": "node .test-build/examples/durable-bank.js",
-    "example:crm": "node .test-build/examples/crm/v1.js",
-    "example:crm:migrations": "node .test-build/examples/crm/migrations.js",
-    "example:effect": "node .test-build/examples/bank/with-effect.js",
-    "format:examples": "prettier --write examples",
-    "format:examples:check": "prettier --check examples"
+    "prepublishOnly": "npm run build"
   },
   "peerDependencies": {
     "effect": "^4.1.2"
@@ -58,8 +49,10 @@
   "devDependencies": {
     "@types/node": "^24.0.0",
     "effect": "4.1.2",
-    "prettier": "3.9.10",
     "typescript": "^7.0.2"
   },
-  "sideEffects": false
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  }
 }

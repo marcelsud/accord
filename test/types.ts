@@ -425,7 +425,7 @@ async function classInference() {
 }
 
 async function factoryInference() {
-  const { Account, Bank } = await import('../examples/bank/domain.js');
+  const { Account, Bank } = await import('./fixtures/bank-domain.js');
   const services = { rules: { maximum: 1_000 } };
   // @ts-expect-error Factory dependencies must be supplied to native wire().
   wire(Bank);
@@ -463,7 +463,7 @@ type ProjectedBalance = Expect<Equal<typeof projectedBalance, { cents: number }>
 ValueBalance.of('100');
 
 async function effectModelInference() {
-  const { Bank, DepositRules } = await import('../examples/bank/domain.js');
+  const { Bank, DepositRules } = await import('./fixtures/bank-domain.js');
   const acquire = effectify(Bank);
   type BankRequirements = Expect<Equal<Effect.Services<typeof acquire>, Requirement<typeof DepositRules>>>;
   // @ts-expect-error The bank's declared service must be provided.
@@ -485,7 +485,7 @@ async function effectModelInference() {
 }
 
 async function effectModelLayerInference() {
-  const { Bank: BankModel, DepositRules } = await import('../examples/bank/domain.js');
+  const { Bank: BankModel, DepositRules } = await import('./fixtures/bank-domain.js');
   const Bank = effectify(BankModel, 'Bank');
   type BankLayerRequirements = Expect<Equal<Layer.Services<typeof Bank.layer>, Requirement<typeof DepositRules>>>;
   const RulesLive = Layer.succeed(effectify(DepositRules), { maximum: 1_000 });

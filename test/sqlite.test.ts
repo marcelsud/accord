@@ -10,9 +10,9 @@ import { sqlite } from '../src/sqlite.js';
 import { Account, Deposited, NotOpen } from './fixtures.js';
 import { durableBank, total } from './fixtures/durable-bank.js';
 import { failure, success } from './helpers.js';
-import { openLedger } from '../examples/notifications/adapters/sqlite.js';
-import { createBank as pureBank } from '../examples/notifications/pure.js';
-import { createBank as effectBank } from '../examples/notifications/with-effect.js';
+import { openLedger } from './fixtures/notification-ledger.js';
+import { createBank as pureBank } from './fixtures/notification-pure.js';
+import { createBank as effectBank } from './fixtures/notification-effect.js';
 
 function temporaryDatabase() {
   const directory = mkdtempSync(join(tmpdir(), 'accord-storage-'));

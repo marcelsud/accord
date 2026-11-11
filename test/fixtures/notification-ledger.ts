@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
-import { fail, parse, trycatch, unexpected } from "@marcelsud/accord";
-import { LedgerRow } from "../domain.js";
+import { fail, parse, trycatch, unexpected } from "../../src/index.js";
+import { LedgerRow } from "./notification-domain.js";
 
 /** Own a ledger connection, or join the durable runtime's transaction on a shared connection. */
 export function openLedger(filename: string | DatabaseSync = ":memory:") {
