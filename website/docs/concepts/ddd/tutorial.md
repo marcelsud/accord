@@ -1,6 +1,6 @@
 # Tutorial: a lending desk
 
-This file models one aggregate, one invariant, one event, and one read model. The regions below are slices of the same program. Run the whole file with Node.js 24 after building `@marcelsud/accord`.
+This file models one aggregate, one invariant, one event, and one read model. The regions below are slices of the same program. It runs on Node.js 24 against `@marcelsud/accord@0.1.0`.
 
 ## 1. Name the facts
 

@@ -6,6 +6,8 @@ Source: [`bank/`](examples:bank)
 
 ## Run it
 
+From the [accord-examples](examples:) repository, after `npm ci` and `npm run build`:
+
 ```sh
 npm run bank
 npm run bank:effect

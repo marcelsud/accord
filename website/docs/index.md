@@ -33,14 +33,27 @@ That's it. `wire()` gives you a typed client. Each call loads the stored state, 
 
 ## Quick Start
 
-Accord isn't on npm yet. Build a tarball from the repository and install it:
+Install `@marcelsud/accord` **0.1.0**. You need Node.js 24 or newer.
 
-```sh
-git clone https://github.com/marcelsud/accord.git
-cd accord
-npm ci --ignore-scripts
-npm pack
+::: code-group
+
+```sh [npm]
+npm install @marcelsud/accord@0.1.0
 ```
+
+```sh [yarn]
+yarn add @marcelsud/accord@0.1.0
+```
+
+```sh [pnpm]
+pnpm add @marcelsud/accord@0.1.0
+```
+
+```sh [bun]
+bun add @marcelsud/accord@0.1.0
+```
+
+:::
 
 Then follow [Getting Started](/docs/getting-started/basic).
 
@@ -62,8 +75,8 @@ Then follow [Getting Started](/docs/getting-started/basic).
 | `@marcelsud/accord/sqlite` | The `sqlite()` durable store (Node.js 24 built-in `node:sqlite`) |
 | `@marcelsud/accord/effect` | `effectify()` for Effect v4.1.2+ |
 
-::: warning Version 0.1
-This is the first version. The runtime is in-process, workflows are memory-only, and no npm release has been published yet. See [Limits of v0.1](/docs/guides/limits).
+::: warning Version 0.1.0
+This is version 0.1.0. The runtime is in-process and workflows are memory-only. See [Limits of v0.1](/docs/guides/limits).
 :::
 
 ## Next

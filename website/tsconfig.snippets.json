@@ -10,11 +10,7 @@
     "skipLibCheck": true,
     "noEmit": true,
     "types": ["node"],
-    "typeRoots": ["../node_modules/@types"],
-    "paths": {
-      "@marcelsud/accord": ["../src/index.ts"],
-      "@marcelsud/accord/sqlite": ["../src/sqlite.ts"]
-    }
+    "typeRoots": ["../node_modules/@types"]
   },
   "include": ["snippets/ddd"]
 }

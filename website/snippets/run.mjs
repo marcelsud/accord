@@ -9,9 +9,7 @@ const files = readdirSync(join(here, 'ddd')).filter((name) => name.endsWith('.ts
 for (const file of files) {
   const path = join(here, 'ddd', file)
   const code = await new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ['--experimental-strip-types', '--import', join(here, 'register.mjs'), path], {
-      stdio: 'inherit',
-    })
+    const child = spawn(process.execPath, ['--experimental-strip-types', path], { stdio: 'inherit' })
     child.on('error', reject)
     child.on('exit', resolve)
   })

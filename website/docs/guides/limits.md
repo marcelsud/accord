@@ -11,7 +11,6 @@ Accord's first version is deliberately small. Here's what it does and doesn't do
 
 ## Not included (yet)
 
-- **npm release.** Install from a local `npm pack` tarball for now.
 - **Durable workflows.** Workflow state is memory-only; SQLite models with workflows are rejected.
 - **Background scheduling.** No automatic flush, retry backoff, or timers outside a running process.
 - **Migrations and retention.** No migration orchestration, upcaster registry, or retention policy. Histories grow forever.

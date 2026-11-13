@@ -6,6 +6,8 @@ Source: [`notifications/`](examples:notifications)
 
 ## Run it
 
+From the [accord-examples](examples:) repository, after `npm ci` and `npm run build`:
+
 ```sh
 npm run notifications
 npm run notifications:effect

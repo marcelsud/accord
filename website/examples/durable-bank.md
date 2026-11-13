@@ -2,11 +2,11 @@
 
 Commit a deposit in one process, deliver it in another. A counter projection writes through the runtime's SQLite connection, so its SQL change and checkpoint commit together and nothing is counted twice.
 
-Source: [`durable-bank/`](examples:durable-bank)
+Source: [`durable-bank/index.ts`](examples:durable-bank/index.ts)
 
 ## Run it
 
-Use a new filename for a fresh demo:
+From the [accord-examples](examples:) repository, after `npm ci` and `npm run build`. Use a new filename for a fresh demo:
 
 ```sh
 npm run durable -- /tmp/accord-runtime.sqlite deposit 100
@@ -46,4 +46,4 @@ const bank = wire(model('DurableBank', { aggregates: { account: Account }, proje
 
 `deposit` commits and exits without flushing. `drain` calls `bank.flush()` and prints the table.
 
-It reuses the `Account` from the [Notifications example](/examples/notifications). See the [SQLite store reference](/docs/api/sqlite) for the recovery table.
+It reuses `Account` from [`notifications/domain.ts`](examples:notifications/domain.ts). See the [SQLite store reference](/docs/api/sqlite) for the recovery table.
