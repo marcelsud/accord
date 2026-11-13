@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": ["node"],
+    "typeRoots": ["../node_modules/@types"],
+    "paths": {
+      "@marcelsud/accord": ["../src/index.ts"],
+      "@marcelsud/accord/sqlite": ["../src/sqlite.ts"]
+    }
+  },
+  "include": ["snippets/ddd"]
+}
